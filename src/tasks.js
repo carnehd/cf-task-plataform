@@ -598,6 +598,21 @@ function register(ipcMain, ctx) {
     return { task: view(t), added };
   }));
 
+  // Mudar o nome da tarefa: só o título (a referência e o tipo ficam). Não com um agente a trabalhar: a sequência
+  // guarda a tarefa enquanto corre e podia repor o nome antigo.
+  ipcMain.handle('tasks:rename', guard((id, title) => {
+    if (pipeline.isRunning(String(id))) throw new Error('Espera que o agente acabe (ou pára-o) para mudar o nome');
+    const t = load(id);
+    const next = clip(title, 200);
+    if (!next) throw new Error('Dá um nome à tarefa');
+    if (next !== t.title) {
+      event(t, 'user', `Nome mudado: ${t.title} → ${next}`);
+      t.title = next;
+      save(t); // sem avisar: a página que o mudou já o mostra
+    }
+    return { title: t.title };
+  }));
+
   ipcMain.handle('tasks:remove', guard((id) => {
     if (pipeline.isRunning(String(id))) throw new Error('Pára primeiro o agente que está a correr nesta tarefa');
     fs.rmSync(dirOf(id), { recursive: true, force: true });

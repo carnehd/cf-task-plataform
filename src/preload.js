@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld('estaleiro', {
     replaceDocument: invoke('tasks:replace-document'),
     addToFolder: invoke('tasks:add-to-folder'),
     remove: invoke('tasks:remove'),
+    rename: invoke('tasks:rename'),
   },
   pipeline: {
     start: invoke('pipeline:start'),

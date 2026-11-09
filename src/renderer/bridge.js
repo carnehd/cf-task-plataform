@@ -135,6 +135,7 @@
       replaceDocument: post('tasks:replace-document'),
       addToFolder: post('tasks:add-to-folder'),
       remove: post('tasks:remove'),
+      rename: post('tasks:rename'),
     },
     pipeline: {
       start: post('pipeline:start'),

@@ -411,6 +411,26 @@
   // ===== Uma tarefa =====
   const stepClass = (s) => ({ done: 'done', running: 'running', waiting: 'waiting', paused: 'waiting', interrupted: 'waiting', stopped: 'waiting', failed: 'failed' }[s] || '');
 
+  // o cabeçalho de uma tarefa, numa linha: voltar, nome, tipo · documentos · data, estado; à direita Editar nome e Apagar
+  function taskHead(t) {
+    const busy = t.running ? ' disabled title="Não se muda o nome com um agente a trabalhar"' : ' title="Mudar o nome da tarefa"';
+    return `<div class="page-head task-head">
+        <a class="btn small" href="#tarefas">← Tarefas</a>
+        <h1 id="task-title" title="${esc(t.title)}">${t.ref ? `<span class="mono dim" style="font-weight:400">${esc(t.ref)}</span> ` : ''}${esc(t.title)}</h1>
+        <span class="sub">${t.type === 'defeito' ? 'Defeito' : 'Requisito'} · ${t.documents.length} documento${t.documents.length === 1 ? '' : 's'} · criada ${esc(when(t.createdAt))}</span>
+        ${pill(t.status)}
+        <span class="spacer"></span>
+        <button class="btn" data-act="rename-task" type="button"${busy}>Editar nome</button>
+        <button class="btn bad" data-act="delete-task" type="button">Apagar</button>
+      </div>`;
+  }
+  // volta a desenhar só o cabeçalho (e o caminho no topo), depois de mudar o nome
+  function repaintHead() {
+    const head = $('.task-head');
+    if (head && state.task) head.outerHTML = taskHead(state.task);
+    if (state.view === 'tarefa') setView('tarefa');
+  }
+
   async function renderTask(opts = {}) {
     const t = state.task;
     if (!t) return;
@@ -421,13 +441,7 @@
         return `<button class="tab ${stepClass(f.status)}${state.tab === s.id ? ' active' : ''}" data-tab="${s.id}" type="button"><span class="num">${n + 3}</span>${esc(s.name)} ${f.status === 'idle' ? `<span class="pill">${f.links.length} agente${f.links.length === 1 ? '' : 's'}</span>` : statusPill(f.status)}</button>`;
       })).join('');
     $('#view-tarefa').innerHTML = `
-      <div class="page-head">
-        <a class="btn small" href="#tarefas">← Tarefas</a>
-        <div class="grow"><h1>${t.ref ? `<span class="mono dim" style="font-weight:400">${esc(t.ref)}</span> ` : ''}${esc(t.title)}</h1>
-          <p class="sub">${t.type === 'defeito' ? 'Defeito' : 'Requisito'} · ${t.documents.length} documento${t.documents.length === 1 ? '' : 's'} · criada ${esc(when(t.createdAt))}</p></div>
-        ${pill(t.status)}
-        <button class="btn bad" data-act="delete-task" type="button">Apagar</button>
-      </div>
+      ${taskHead(t)}
       <div class="task">
         <div class="center">
           <div class="tabs" role="tablist" aria-label="Passos da tarefa">${tabs}</div>
@@ -745,11 +759,11 @@
           ${qs.map((q, n) => `<div class="question-block" data-q="${n}" data-question="${esc(q.question)}"><b>${esc(q.question)}</b>
             <div class="q-options">${(q.options || []).map((o) => `<label class="q-option"><input type="${q.multiSelect ? 'checkbox' : 'radio'}" name="q-${esc(p.id)}-${n}" value="${esc(o.label)}"><span><b>${esc(o.label)}</b>${o.description ? `<small>${esc(o.description)}</small>` : ''}</span></label>`).join('')}
               <label class="q-option"><input type="${q.multiSelect ? 'checkbox' : 'radio'}" name="q-${esc(p.id)}-${n}" value="__outra"><span><b>Outra</b><input type="text" class="q-other" placeholder="Escreve a tua resposta"></span></label></div></div>`).join('')}
-          <div class="actions"><button class="btn primary small" data-act="answer-question" data-req="${esc(p.id)}" type="button">Responder</button><button class="btn small bad" data-act="perm" data-choice="deny" data-req="${esc(p.id)}" type="button">Não responder</button></div></div>`;
+          <div class="actions"><button class="btn primary small" data-act="answer-question" data-req="${esc(p.id)}" type="button">Responder</button><button class="btn small deny" data-act="perm" data-choice="deny" data-req="${esc(p.id)}" type="button">Não responder</button></div></div>`;
       }
       const what = p.tool === 'Bash' ? `<pre class="cmd">${formatCmd(p.summary)}</pre>` : `<code>${esc(p.summary)}</code>`;
       return `<div class="perm" data-req="${esc(p.id)}"><div class="title"><span class="dot warn live"></span>Pedido de permissão · ${esc(p.tool)}</div>${what}
-        <div class="actions"><button class="btn primary small" data-act="perm" data-choice="allow" data-req="${esc(p.id)}" type="button">Permitir</button><button class="btn small" data-act="perm" data-choice="always" data-req="${esc(p.id)}" type="button">Permitir nesta tarefa</button><button class="btn small bad" data-act="perm" data-choice="deny" data-req="${esc(p.id)}" type="button">Recusar</button></div></div>`;
+        <div class="actions"><button class="btn primary small" data-act="perm" data-choice="allow" data-req="${esc(p.id)}" type="button">Permitir</button><button class="btn small" data-act="perm" data-choice="always" data-req="${esc(p.id)}" type="button">Permitir nesta tarefa</button><button class="btn small deny" data-act="perm" data-choice="deny" data-req="${esc(p.id)}" type="button">Recusar</button></div></div>`;
     }).join('');
   }
 
@@ -776,7 +790,7 @@
       return `<input type="checkbox" data-keys="${esc(JSON.stringify(items.map((x) => x.key)))}" ${on === items.length ? 'checked' : ''} ${on && on < items.length ? 'data-indet' : ''} ${ed ? '' : 'disabled'} aria-label="${esc(label)}">`;
     };
     const extraId = (key) => key.split(':')[1];
-    const trash = (id) => `<button class="ib" type="button" data-act="remove-step-input" data-id="${esc(id)}" data-tip="Tirar deste passo" aria-label="Tirar deste passo">${icon('trash')}</button>`;
+    const trash = (id) => `<button class="ib bad" type="button" data-act="remove-step-input" data-id="${esc(id)}" data-tip="Tirar deste passo" aria-label="Tirar deste passo">${icon('trash')}</button>`;
     const view = (x) => `<button class="ib" type="button" data-act="view-input" data-key="${esc(x.key)}" data-tip="Ver" aria-label="Ver">${icon('eye')}</button>`;
     const row = (g, x, sub) => `<div class="in-row${x.on ? '' : ' off'}${sub ? ' sub' : ''}">
         <label class="in-pick">${box([x], x.name)}${typeBadge({ kind: 'file', name: x.name }, true)}<span class="fname" title="${esc(x.name)}">${esc(x.name)}</span></label>
@@ -1021,15 +1035,15 @@
     const seq = f.links.map((l, n) => {
       const st = l.settings || { model: '', perm: 'ask' };
       const used = { model: l.model !== undefined && running ? l.model : st.model, perm: l.perm !== undefined && running ? l.perm : st.perm };
-      const choices = editable ? `<div class="choices">
-          <label class="f">Modelo · ${l.tool === 'copilot' ? 'Copilot CLI' : 'Claude Code'}<select data-setting="model" data-agent="${esc(l.agentId)}">${(() => { const opts = modelOpts(l.tool); return (opts.some((o) => o[0] === used.model) ? opts : [...opts, [used.model, used.model]]).map(([v, lab]) => `<option value="${esc(v)}" ${used.model === v ? 'selected' : ''}>${esc(lab)}</option>`).join(''); })()}</select></label>
-          <label class="f">Permissões<select data-setting="perm" data-agent="${esc(l.agentId)}">${PERM_OPTS.map(([v, lab]) => `<option value="${v}" ${used.perm === v ? 'selected' : ''}>${lab}</option>`).join('')}</select></label>
-          <div class="perm-help" data-help="${esc(l.agentId)}">${esc(permHelp(used.perm))}</div></div>`
-        : `<div class="seq-meta"><span class="pill">${esc(modelName(used.model, l.tool))}</span><span class="pill">${esc(permName(used.perm))}</span></div>`;
+      const off = editable ? '' : ' disabled title="Não se muda com um agente a trabalhar nesta tarefa"';
+      const choices = `<div class="choices">
+          <label class="f">Modelo · ${l.tool === 'copilot' ? 'Copilot CLI' : 'Claude Code'}<select data-setting="model" data-agent="${esc(l.agentId)}"${off}>${(() => { const opts = modelOpts(l.tool); return (opts.some((o) => o[0] === used.model) ? opts : [...opts, [used.model, used.model]]).map(([v, lab]) => `<option value="${esc(v)}" ${used.model === v ? 'selected' : ''}>${esc(lab)}</option>`).join(''); })()}</select></label>
+          <label class="f">Permissões<select data-setting="perm" data-agent="${esc(l.agentId)}"${off}>${PERM_OPTS.map(([v, lab]) => `<option value="${v}" ${used.perm === v ? 'selected' : ''}>${lab}</option>`).join('')}</select></label>
+          <div class="perm-help" data-help="${esc(l.agentId)}">${esc(permHelp(used.perm))}</div></div>`;
       return `<div class="seq-row${n === i ? ' active' : ''}"><button class="seq-pick" type="button" data-sel="${n}"><span class="seq-n">${n + 1}</span><span class="seq-main"><span class="seq-title"><span class="seq-name"><span class="dim">Agente:</span> <b>${esc(l.name)}</b></span>${statusPill(l.status)}</span>${l.pause || l.tokens ? `<span class="seq-meta">${l.pause ? '<span class="pill" title="A sequência pára depois deste agente até aprovares">pausa depois</span>' : ''}${l.tokens ? `<span class="dim">${esc(tokens(l.tokens))}</span>` : ''}</span>` : ''}</span></button>${choices}</div>`;
     }).join('');
     const inSummary = state.inputs ? `<button class="in-summary" type="button" data-mode="entradas">${icon('eye')}<span>${state.inputs.on === state.inputs.total ? `Recebem ${state.inputs.total} documento${state.inputs.total === 1 ? '' : 's'}` : `Recebem ${state.inputs.on} de ${state.inputs.total} documentos`}</span><span class="dim">Entradas</span></button>` : '';
-    const controls = `${inSummary}<div class="row">
+    const controls = `${inSummary}<div class="step-acts">
       ${canStart ? `<button class="btn primary" data-act="start-step" type="button">${f.status === 'idle' ? 'Começar' : 'Correr o passo de novo'}</button>` : ''}
       ${f.status === 'paused' ? '<button class="btn good" data-act="continue-step" type="button">Aprovar e continuar</button>' : ''}
       ${running ? '<button class="btn bad" data-act="stop-step" type="button">Parar</button>' : ''}
@@ -1312,6 +1326,7 @@
       const n = f.links.findIndex((x) => ACTIVE.includes(x.status));
       const st = n >= 0 ? linkState(f, n) : 'done';
       ball.dataset.state = st;
+      faceFromStatus(t, shown.id, n, st, f);
       ball.title = `${officeOpen() ? 'Esconder' : 'Ver'} o escritório · ${shown.name}: ${n >= 0 ? `${f.links[n].name} ${st === 'waiting' ? 'à tua espera' : 'a trabalhar'}` : 'ninguém a trabalhar'}`;
       ball.setAttribute('aria-label', ball.title);
     }
@@ -1319,6 +1334,53 @@
     if (officeKey(t, office.step) !== office.key) { showOffice(office.step); return; }
     if (office.inst) t.flow[office.step].links.forEach((l, n) => office.inst.setStatus(n, linkState(t.flow[office.step], n)));
   }
+  // ---- A cara do robô na bola: a expressão segue o agente que a bola mostra. O estado da plataforma manda
+  // (à tua espera, terminou, falhou); enquanto corre, os eventos da consola dizem se pensa, usa ferramentas ou escreve ----
+  const face = { ref: '', mood: 'thinking', timer: null };
+  const RUN_MOODS = ['thinking', 'working', 'writing'];
+  function setMood(mood, after) {
+    clearTimeout(face.timer);
+    face.mood = mood;
+    // estados de passagem: escrever volta a pensar, a festa do fim volta ao repouso
+    if (after) face.timer = setTimeout(() => { if (face.mood === mood) { face.mood = after; paintFace(); } }, mood === 'writing' ? 2500 : 3200);
+    paintFace();
+  }
+  function paintFace() {
+    const ball = $('#office-ball');
+    if (!ball) return;
+    const box = $('#msg-in');
+    // estás a escrever ao agente: ele ouve (só enquanto não há erro)
+    const typing = box && document.activeElement === box && box.value.trim() && face.mood !== 'error';
+    ball.dataset.face = typing ? 'listening' : face.mood;
+  }
+  function faceFromStatus(t, step, n, st, f) {
+    const ref = `${t.id}|${step}|${n}`;
+    if (ref !== face.ref) { face.ref = ref; face.mood = ''; }
+    if (st === 'waiting') { if (face.mood !== 'approval') setMood('approval'); return; }
+    if (st === 'running') { if (!RUN_MOODS.includes(face.mood)) setMood('thinking'); else paintFace(); return; }
+    // ninguém a trabalhar: como acabou o último agente que correu
+    const ss = f.links.map((l) => l.status);
+    const end = ss.includes('failed') ? 'error' : ss.some((s) => s === 'stopped' || s === 'interrupted') ? 'sleeping' : 'success';
+    if (face.mood === end || (end === 'success' && face.mood === 'idle')) { paintFace(); return; }
+    setMood(end, end === 'success' ? 'idle' : null);
+  }
+  function faceFromEntry(e) {
+    const a = String(e.a || '');
+    switch (e.k) {
+      case 'start': case 'user': case 'result': return setMood('thinking');
+      case 'tool': return setMood('working');
+      case 'say': return setMood('writing', 'thinking');
+      case 'ask': case 'wait': return setMood('approval');
+      case 'ok': if (a === 'Terminou') return setMood('success', 'idle'); return face.mood === 'approval' ? setMood('thinking') : null;
+      case 'deny':
+        if (a === 'Parou') return setMood('error');
+        if (a === 'Parado') return setMood('sleeping');
+        return face.mood === 'approval' ? setMood('thinking') : null;
+      default: return null;
+    }
+  }
+  document.addEventListener('input', (e) => { if (e.target && e.target.id === 'msg-in') paintFace(); });
+  document.addEventListener('focusout', (e) => { if (e.target && e.target.id === 'msg-in') setTimeout(paintFace, 0); });
   function closeOffice() {
     $('#office-pop').hidden = true;
     if (office.inst) office.inst.pause(); // escondida não gasta: retoma onde estava
@@ -1439,6 +1501,31 @@
   }
 
   const actions = {
+    // mudar o nome da tarefa, ali mesmo no cabeçalho (Enter guarda, Esc cancela)
+    'rename-task': () => {
+      const h = $('#task-title');
+      if (!h || $('#rename-in') || !state.task) return;
+      h.outerHTML = `<span class="rename"><input type="text" id="rename-in" maxlength="200" value="${esc(state.task.title)}" aria-label="Nome da tarefa" autocomplete="off" spellcheck="false"><button class="btn small primary" data-act="rename-save" type="button">Guardar</button><button class="btn small" data-act="rename-cancel" type="button">Cancelar</button></span>`;
+      const btn = $('[data-act="rename-task"]');
+      if (btn) btn.hidden = true;
+      const input = $('#rename-in');
+      input.focus();
+      input.select();
+    },
+    'rename-save': async () => {
+      const input = $('#rename-in');
+      if (!input || !state.task) return;
+      const name = input.value.trim();
+      if (!name) { toast('Dá um nome à tarefa', true); input.focus(); return; }
+      if (name !== state.task.title) {
+        const r = await call(api.tasks.rename(taskId(), name));
+        if (!r) return;
+        state.task.title = r.title;
+        toast('Nome guardado');
+      }
+      repaintHead();
+    },
+    'rename-cancel': () => repaintHead(),
     'toggle-office': () => (officeOpen() ? closeOffice() : showOffice()),
     'new-task': openNewTask,
     'delete-task': async () => {
@@ -1773,6 +1860,8 @@
     }
     if (e.key === 'Enter' && e.target.id === 'root-in') actions['save-root']();
     if (e.key === 'Enter' && e.target.id === 'msg-in') actions['send-msg']();
+    if (e.key === 'Enter' && e.target.id === 'rename-in') { e.preventDefault(); actions['rename-save'](); return; }
+    if (e.key === 'Escape' && e.target.id === 'rename-in') { actions['rename-cancel'](); return; }
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && e.target.classList && e.target.classList.contains('doubt-a')) { e.preventDefault(); actions['send-doubts'](); }
     if (e.key === 'Enter' && e.target.id === 'ma-path') scanFolder();
     if (e.key === 'Escape' && officeOpen() && !$$('.overlay.open').length) { closeOffice(); return; }
@@ -1956,6 +2045,7 @@
   api.onTaskEvent(async (e) => {
     const t = state.task;
     if (e.type === 'log' && office.inst && office.task === e.taskId && office.step === e.step) office.inst.feed(e.index, e.entry);
+    if (e.type === 'log' && face.ref === `${e.taskId}|${e.step}|${e.index}`) faceFromEntry(e.entry);
     if (e.type === 'log') {
       if (!t || t.id !== e.taskId || state.tab !== e.step || linkIndex() !== e.index) return;
       state.entries.push(e.entry);
