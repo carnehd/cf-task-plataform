@@ -13,7 +13,8 @@ const { spawn } = require('child_process');
 const core = require('./core');
 
 const APP_DIR = path.join(__dirname, '..');
-const DATA_DIR = process.env.ESTALEIRO_DATA ? path.resolve(process.env.ESTALEIRO_DATA) : path.join(APP_DIR, 'data');
+const DATA_ENV = process.env.BEEKEEPER_DATA || process.env.ESTALEIRO_DATA; // ESTALEIRO_DATA: o nome antigo, continua a valer
+const DATA_DIR = DATA_ENV ? path.resolve(DATA_ENV) : path.join(APP_DIR, 'data');
 const RENDERER = path.join(__dirname, 'renderer');
 const PORT = Number(process.env.PORT) || 5810;
 const HOST = '127.0.0.1';
@@ -58,10 +59,13 @@ const openPath = (p) => new Promise((resolve) => {
 });
 
 // Mostra um ficheiro no explorador de ficheiros, com ele escolhido
+// No Windows, o Explorador só entende /select,"caminho" com as aspas à volta do caminho; o Node punha-as à volta do
+// argumento inteiro ("/select,C:\Users\Nome Apelido\...") quando há espaços, e o Explorador abria outra pasta
 const revealPath = (p) => new Promise((resolve) => {
-  const [cmd, args] = process.platform === 'darwin' ? ['open', ['-R', p]] : process.platform === 'win32' ? ['explorer', [`/select,${p}`]] : ['xdg-open', [path.dirname(p)]];
+  const win = process.platform === 'win32';
+  const [cmd, args] = process.platform === 'darwin' ? ['open', ['-R', p]] : win ? ['explorer.exe', [`/select,"${p}"`]] : ['xdg-open', [path.dirname(p)]];
   try {
-    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true });
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: win });
     child.on('error', (e) => resolve(`Não consegui mostrar ${p}: ${e.message}`));
     child.unref();
     setTimeout(() => resolve(''), 300);
@@ -73,9 +77,30 @@ const revealPath = (p) => new Promise((resolve) => {
 core.registerAll(ipcMain, { dataDir: DATA_DIR, appDir: APP_DIR, send, getWindow: () => null, dialog, version: require('../package.json').version, mode: 'web', openPath, revealPath });
 
 // Só no browser: o que há numa pasta, para a página escolher pastas e ficheiros
+// Os atalhos do seletor: a pasta da app, o início, as pastas habituais, a raiz dos microserviços e, no
+// Windows, as unidades
+function places() {
+  const home = os.homedir();
+  const out = [{ label: 'Pasta da app', path: APP_DIR, kind: 'app' }, { label: 'Início', path: home, kind: 'home' }];
+  const win = process.platform === 'win32';
+  for (const [name, label] of [['Desktop', win ? 'Ambiente de trabalho' : 'Secretária'], ['Documents', 'Documentos'], ['Downloads', 'Transferências']]) {
+    const p = path.join(home, name);
+    if (fs.existsSync(p)) out.push({ label, path: p, kind: 'folder' });
+  }
+  try {
+    const root = require('./settings').rootDir(DATA_DIR);
+    if (root) out.push({ label: 'Microserviços', path: root, kind: 'root' });
+  } catch {
+    // sem pasta raiz
+  }
+  if (win) for (const l of 'CDEFGHIJ') if (fs.existsSync(`${l}:\\`)) out.push({ label: `${l}:`, path: `${l}:\\`, kind: 'drive' });
+  return out;
+}
+
 ipcMain.handle('fs:list', async (_, where) => {
   try {
-    let dir = path.resolve(String(where || os.homedir()));
+    // sem pasta pedida, a pasta da própria app (a do npm run web), seja de onde for que o servidor arrancou
+    let dir = path.resolve(String(where || APP_DIR));
     if (fs.existsSync(dir) && fs.statSync(dir).isFile()) dir = path.dirname(dir);
     if (!fs.existsSync(dir)) return { error: `A pasta não existe: ${dir}` };
     const entries = [];
@@ -90,11 +115,21 @@ ipcMain.handle('fs:list', async (_, where) => {
           continue;
         }
       }
-      if (isDir || e.isFile() || e.isSymbolicLink()) entries.push({ name: e.name, full, dir: isDir });
+      if (!isDir && !e.isFile() && !e.isSymbolicLink()) continue;
+      let size = null;
+      let mtime = null;
+      try {
+        const st = fs.statSync(full);
+        size = isDir ? null : st.size;
+        mtime = st.mtimeMs;
+      } catch {
+        // sem acesso: fica sem tamanho nem data
+      }
+      entries.push({ name: e.name, full, dir: isDir, size, mtime });
     }
     entries.sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name, undefined, { numeric: true }) : a.dir ? -1 : 1));
     const parent = path.dirname(dir);
-    return { path: dir, parent: parent === dir ? null : parent, home: os.homedir(), entries: entries.slice(0, 600), more: entries.length > 600 };
+    return { path: dir, parent: parent === dir ? null : parent, home: os.homedir(), sep: path.sep, places: places(), entries: entries.slice(0, 600), more: entries.length > 600 };
   } catch (e) {
     return { error: String((e && e.message) || e) };
   }
@@ -180,7 +215,7 @@ server.on('error', (e) => {
   process.exit(1);
 });
 server.listen(PORT, HOST, () => {
-  console.log(`Estaleiro a correr. Abre no browser:\n\n  http://${HOST}:${PORT}/?t=${TOKEN}\n\nDados em ${DATA_DIR}. Ctrl+C para parar.`);
+  console.log(`Beekeeper a correr. Abre no browser:\n\n  http://${HOST}:${PORT}/?t=${TOKEN}\n\nDados em ${DATA_DIR}. Ctrl+C para parar.`);
 });
 
 const stop = () => {

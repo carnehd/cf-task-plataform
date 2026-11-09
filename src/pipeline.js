@@ -48,12 +48,17 @@ function tailLines(file, max) {
 }
 // cada agente corre no CLI de onde veio: o Claude Code ou o Copilot CLI
 const CLI = { claude: { name: 'claude', label: 'Claude CLI' }, copilot: { name: 'copilot', label: 'Copilot CLI' } };
-const cliOf = (agent) => CLI[agent && (agent.runner || agent.tool) === 'copilot' ? 'copilot' : 'claude'];
+// todos os agentes correm no CLI escolhido no topo da página (definições); os ficheiros do agente servem aos dois
+let chosenCli = () => 'claude';
+const cliOf = () => CLI[chosenCli() === 'copilot' ? 'copilot' : 'claude'];
 // um modelo serve ao CLI do agente? (os do Claude são os nomes curtos; os do Copilot, os nomes do Copilot CLI)
 const modelFits = (agent, m) => (cliOf(agent).name === 'copilot' ? m === '' || (COPILOT_MODEL.test(String(m || '')) && !MODELS.includes(m)) : MODELS.includes(m));
 // um modelo do Copilot: o nome que o Copilot CLI aceita (ou auto)
 const COPILOT_MODEL = /^[a-z0-9][a-z0-9.-]{0,60}$/i;
 const active = new Map(); // id da tarefa -> { step, index, session }: só um agente de cada vez por tarefa
+// as tarefas entre um agente que acabou e o seguinte (ou o fecho do passo, com a verificação do código congelado):
+// não há agente ativo, mas o passo continua a correr; sem isto a página mostrava "interrompido" nesse instante
+const moving = new Set();
 
 const now = () => new Date().toISOString();
 const slug = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'agente';
@@ -135,17 +140,20 @@ async function snapshot(root, repoTests = null, names = []) {
 
 function register(ipcMain, h) {
   const { dataDir } = h;
+  chosenCli = () => settings.cli(dataDir) || 'claude';
   const stepDir = (id, step) => path.join(h.dirOf(id), 'steps', step);
   const linkDir = (id, step, i, link) => path.join(stepDir(id, step), `${i + 1}-${slug(link.name)}`);
   const outputsOf = (id, step, i, link) => path.join(linkDir(id, step, i, link), 'outputs');
   const testsDir = (id) => path.join(h.dirOf(id), 'tests');
 
   const tell = (payload) => h.send('task-event', payload);
+  const made = new Set(); // as pastas de consola já criadas (um agente escreve muitas linhas)
   const log = (id, step, i, link, entry) => {
     const line = { at: now(), ...entry };
     try {
-      fs.mkdirSync(linkDir(id, step, i, link), { recursive: true });
-      fs.appendFileSync(path.join(linkDir(id, step, i, link), 'console.jsonl'), `${JSON.stringify(line)}\n`);
+      const dir = linkDir(id, step, i, link);
+      if (!made.has(dir) || !fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); made.add(dir); }
+      fs.appendFileSync(path.join(dir, 'console.jsonl'), `${JSON.stringify(line)}\n`);
     } catch {
       // a página recebe na mesma
     }
@@ -469,7 +477,8 @@ function register(ipcMain, h) {
     if (r.sessionId) link.sessionId = r.sessionId;
     if (link.status === 'done') {
       h.save(t);
-      advance(id, step, i);
+      moving.add(id);
+      advance(id, step, i).catch((e) => console.error(`Ao passar ao agente seguinte (${id}/${step}): ${(e && e.message) || e}`)).finally(() => moving.delete(id));
       return;
     }
     if (link.status === 'stopped') {
@@ -527,7 +536,7 @@ function register(ipcMain, h) {
         continue;
       }
       const links = p.links.map((l, n) => ({ ...l, settings: settingsFor(t, l.agentId), tool: cliOf(agents.get(dataDir, l.agentId)).name, status: (l.status === 'running' || l.status === 'waiting') && !(mine && a.index === n) ? 'interrupted' : l.status }));
-      const status = (p.status === 'running') && !mine ? 'interrupted' : p.status;
+      const status = (p.status === 'running') && !mine && !moving.has(t.id) ? 'interrupted' : p.status;
       out[def.id] = { ...p, status, links, pending: mine ? a.session.pending : [], working: mine ? a.session.working : false };
     }
     return out;
@@ -849,6 +858,7 @@ function register(ipcMain, h) {
 const stopAll = () => {
   for (const a of active.values()) a.session.kill('A plataforma fechou');
 };
-const isRunning = (id) => active.has(id);
+// a correr: com um agente ativo, ou entre um agente que acabou e o seguinte (ou o fecho do passo)
+const isRunning = (id) => active.has(id) || moving.has(id);
 
 module.exports = { register, stopAll, isRunning };

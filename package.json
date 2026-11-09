@@ -1,7 +1,7 @@
 {
   "name": "cf-task-plataform",
-  "productName": "Estaleiro",
-  "version": "0.2.1",
+  "productName": "Beekeeper",
+  "version": "0.3.0",
   "description": "Plataforma para implementar requisitos e resolver defeitos em microserviços com agentes: análise, implementação, ambiente local, testes Bruno e relatório",
   "main": "src/main.js",
   "private": true,
@@ -15,8 +15,8 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.local.estaleiro",
-    "productName": "Estaleiro",
+    "appId": "com.local.beekeeper",
+    "productName": "Beekeeper",
     "files": [
       "src/**/*",
       "skills/**/*",
@@ -28,7 +28,7 @@
     "win": {
       "target": "portable",
       "signAndEditExecutable": false,
-      "artifactName": "Estaleiro-${version}.exe"
+      "artifactName": "Beekeeper-${version}.exe"
     }
   }
 }

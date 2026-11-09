@@ -300,10 +300,13 @@
     const r = await call(api.app.info(again));
     if (r) state.info = r;
     renderRailFoot();
+    syncCliPick();
+    checkAuth(Boolean(again));
     $('#version-badge').textContent = state.info ? `v${state.info.version}` : '';
   }
-  async function loadAgents() {
-    const r = await call(api.agents.list());
+  // light: só para contar (no arranque); a página Agentes pede a lista com os ficheiros de cada agente
+  async function loadAgents(light = false) {
+    const r = await call(api.agents.list(light));
     if (r) { state.agents = r.agents; state.stepList = r.steps || []; }
     $('#count-agentes').textContent = String(state.agents.length);
   }
@@ -325,6 +328,59 @@
     state.task = r.task;
     return true;
   }
+
+  // -- o CLI que corre todos os agentes, no topo: o escolhido, e o que não está instalado assinalado --
+  const CLI_NAME = { claude: 'Claude Code', copilot: 'Copilot CLI' };
+  const cliNow = () => (state.info && state.info.cli) || 'claude';
+  const cliFound = (c) => !state.info || Boolean(state.info.clis[c] && state.info.clis[c].found);
+  function syncCliPick() {
+    const sel = $('#cli-pick');
+    if (!sel || !state.info) return;
+    for (const o of sel.options) o.textContent = `${CLI_NAME[o.value]}${cliFound(o.value) ? '' : ' (não instalado)'}`;
+    sel.value = cliNow();
+    sel.closest('.cli-pick').classList.toggle('missing', !cliFound(cliNow()));
+  }
+  // -- a sessão no CLI escolhido: iniciada, ou não (com o botão para a iniciar) --
+  state.auth = null; // { cli, loggedIn: true | false | null, who, detail }
+  let authAsking = null;
+  function paintAuth() {
+    const el = $('#cli-auth');
+    if (!el) return;
+    const a = state.auth;
+    const name = CLI_NAME[cliNow()];
+    if (!cliFound(cliNow())) { el.innerHTML = ''; return; }
+    if (!a || a.cli !== cliNow()) { el.className = 'cli-auth'; el.innerHTML = '<span class="spinner" aria-hidden="true"></span><span>a ver a sessão…</span>'; return; }
+    if (a.loggedIn) {
+      el.className = 'cli-auth ok';
+      el.innerHTML = `<span class="dot good" aria-hidden="true"></span><span title="${esc(a.who ? `Sessão iniciada no ${name}: ${a.who}` : `Sessão iniciada no ${name}`)}">sessão iniciada</span>`;
+    } else if (a.loggedIn === false) {
+      el.className = 'cli-auth off';
+      el.innerHTML = `<span class="dot bad" aria-hidden="true"></span><span>sem sessão</span><button class="ib" type="button" data-act="cli-login" data-tip="Iniciar sessão no ${esc(name)}" aria-label="Iniciar sessão no ${esc(name)}">${icon('login')}</button>`;
+    } else {
+      el.className = 'cli-auth unknown';
+      el.innerHTML = `<span class="dot" aria-hidden="true"></span><span title="${esc(a.detail || 'Não consegui saber')}">sessão?</span><button class="ib" type="button" data-act="cli-recheck" data-tip="Ver outra vez" aria-label="Ver outra vez a sessão">${icon('refresh')}</button><button class="ib" type="button" data-act="cli-login" data-tip="Iniciar sessão no ${esc(name)}" aria-label="Iniciar sessão no ${esc(name)}">${icon('login')}</button>`;
+    }
+  }
+  async function checkAuth(fresh = false) {
+    const cli = cliNow();
+    if (!cliFound(cli)) { state.auth = null; paintAuth(); return; }
+    if (!state.auth || state.auth.cli !== cli) { state.auth = null; paintAuth(); }
+    const asked = (authAsking = call(api.app.auth(cli, fresh)));
+    const r = await asked;
+    if (asked !== authAsking || cli !== cliNow()) return; // entretanto mudou o CLI, ou já se perguntou de novo
+    const before = state.auth && state.auth.cli === cli ? state.auth.loggedIn : undefined;
+    state.auth = r || { cli, loggedIn: null };
+    paintAuth();
+    // o passo só muda (o botão de começar) se a sessão mudou; redesenhar levava a conversa ao topo
+    if (before !== state.auth.loggedIn && state.view === 'tarefa' && state.task && currentDef()) showStep();
+  }
+  // quem foi iniciar sessão volta à janela: vê-se outra vez (só se ainda não estava iniciada)
+  let authFocusAt = 0;
+  addEventListener('focus', () => {
+    if (!state.auth || state.auth.loggedIn === true || Date.now() - authFocusAt < 20000) return;
+    authFocusAt = Date.now();
+    checkAuth(true);
+  });
 
   // -- a barra de estado da barra lateral --
   function renderRailFoot() {
@@ -431,20 +487,34 @@
     if (state.view === 'tarefa') setView('tarefa');
   }
 
+  // Uma seta da barra dos passos: o ícone, o nome e a marca do estado; a cor diz o estado e a escolhida fica azul.
+  // O pormenor (documentos, agentes, estado) fica na dica.
+  const STEP_ICON = { documentos: 'doc', microservicos: 'nodes', implementacao: 'code', ambiente: 'server', testes: 'flask' };
+  const STEP_MARK = { done: 'check', waiting: 'pause', failed: 'alert' };
+  function stepArrow(id, name, cls, tip) {
+    const on = state.tab === id;
+    const mark = cls === 'running' ? '<span class="sa-live" aria-hidden="true"></span>' : STEP_MARK[cls] ? `<span class="sa-mark">${icon(STEP_MARK[cls])}</span>` : '';
+    return `<button class="step-arrow ${cls}${on ? ' active' : ''}" data-tab="${esc(id)}" type="button" role="tab" aria-selected="${on}" title="${esc(tip)}">${icon(STEP_ICON[id] || 'doc')}<span class="sa-name">${esc(name)}</span>${mark}</button>`;
+  }
+
   async function renderTask(opts = {}) {
     const t = state.task;
     if (!t) return;
-    const tabs = [`<button class="tab ${t.documents.length ? 'done' : ''}${state.tab === 'documentos' ? ' active' : ''}" data-tab="documentos" type="button"><span class="num">1</span>Documentos <span class="pill">${t.documents.length}</span></button>`,
-      `<button class="tab ${(t.chosenServices || []).length ? 'done' : ''}${state.tab === 'microservicos' ? ' active' : ''}" data-tab="microservicos" type="button"><span class="num">2</span>Microserviços <span class="pill">${(t.chosenServices || []).length ? `${t.chosenServices.length} escolhido${t.chosenServices.length === 1 ? '' : 's'}` : 'nenhum'}</span></button>`]
-      .concat(t.stepDefs.map((s, n) => {
-        const f = t.flow[s.id];
-        return `<button class="tab ${stepClass(f.status)}${state.tab === s.id ? ' active' : ''}" data-tab="${s.id}" type="button"><span class="num">${n + 3}</span>${esc(s.name)} ${f.status === 'idle' ? `<span class="pill">${f.links.length} agente${f.links.length === 1 ? '' : 's'}</span>` : statusPill(f.status)}</button>`;
-      })).join('');
+    const nDocs = t.documents.length;
+    const nSvc = (t.chosenServices || []).length;
+    const tabs = [
+      stepArrow('documentos', 'Documentos', nDocs ? 'done' : '', `Documentos · ${nDocs} documento${nDocs === 1 ? '' : 's'}`),
+      stepArrow('microservicos', 'Microserviços', nSvc ? 'done' : '', `Microserviços · ${nSvc ? `${nSvc} escolhido${nSvc === 1 ? '' : 's'}` : 'nenhum escolhido (os agentes decidem)'}`),
+    ].concat(t.stepDefs.map((s) => {
+      const f = t.flow[s.id];
+      const tip = f.status === 'idle' ? `${f.links.length} agente${f.links.length === 1 ? '' : 's'}, por começar` : (STATUS[f.status] || ['', f.status])[1];
+      return stepArrow(s.id, s.name, stepClass(f.status), `${s.name} · ${tip}`);
+    })).join('');
     $('#view-tarefa').innerHTML = `
       ${taskHead(t)}
       <div class="task">
         <div class="center">
-          <div class="tabs" role="tablist" aria-label="Passos da tarefa">${tabs}</div>
+          <div class="steps-bar" role="tablist" aria-label="Passos da tarefa">${tabs}</div>
           <div class="panel active" id="panel"></div>
         </div>
       </div>`;
@@ -486,13 +556,15 @@
   function servicesPanel(t) {
     const chosen = new Set(t.chosenServices || []);
     const ed = !t.running;
-    const changed = new Set(Object.keys((t.git && t.git.repos) || {}));
     const names = new Set(state.services.map((s) => s.name));
     const missing = [...chosen].filter((n) => !names.has(n));
-    const row = (s) => `<label class="svc-row${chosen.has(s.name) ? ' on' : ''}" data-name="${esc(s.name.toLowerCase())}">
-        <input type="checkbox" data-svc="${esc(s.name)}" ${chosen.has(s.name) ? 'checked' : ''} ${ed ? '' : 'disabled'}>
-        <span class="svc-main"><b>${esc(s.name)}</b><span class="svc-meta">${s.build ? `<span class="pill">${esc(s.build)}${s.springBoot ? ' · Spring Boot' : ''}</span>` : ''}${s.port ? `<span class="pill">porta ${esc(s.port)}</span>` : ''}${s.branch ? `<span class="mono dim">${esc(s.branch)}</span>` : ''}${changed.has(s.name) ? '<span class="pill good" title="A Implementação criou o branch da tarefa neste microserviço">alterado nesta tarefa</span>' : ''}</span></span></label>`;
-    const list = state.services.map(row).join('') + missing.map((n) => `<label class="svc-row on missing" data-name="${esc(n.toLowerCase())}"><input type="checkbox" data-svc="${esc(n)}" checked ${ed ? '' : 'disabled'}><span class="svc-main"><b>${esc(n)}</b><span class="svc-meta"><span class="pill warn">já não está na pasta raiz</span></span></span></label>`).join('');
+    // só o nome; os escolhidos ficam no topo (e os escolhidos que já não estão na pasta raiz, assinalados)
+    const row = (name, gone = false) => `<label class="svc-row${chosen.has(name) ? ' on' : ''}${gone ? ' missing' : ''}" data-name="${esc(name.toLowerCase())}">
+        <input type="checkbox" data-svc="${esc(name)}" ${chosen.has(name) ? 'checked' : ''} ${ed ? '' : 'disabled'}>
+        <span class="svc-main"><b>${esc(name)}</b>${gone ? '<span class="hint">já não está na pasta raiz</span>' : ''}</span></label>`;
+    const byName = (x, y) => x.localeCompare(y, undefined, { numeric: true });
+    const all = state.services.map((s) => s.name).sort(byName);
+    const list = [...all.filter((n) => chosen.has(n)).map((n) => row(n)), ...missing.sort(byName).map((n) => row(n, true)), ...all.filter((n) => !chosen.has(n)).map((n) => row(n))].join('');
     const picked = [...chosen];
     return `<div class="svc-step">
       <div class="card"><div class="card-head"><h2>Microserviços da tarefa</h2><span class="pill ${picked.length ? 'good' : ''}">${picked.length} de ${state.services.length}</span>
@@ -520,6 +592,8 @@
   }
 
   // ---- Documentos (a lista limpa) ----
+  // o explorador de ficheiros deste sistema, para os botões "Mostrar no ..."
+  const FINDER = /Windows/i.test(navigator.userAgent) ? 'Explorador' : /Mac/i.test(navigator.userAgent) ? 'Finder' : 'gestor de ficheiros';
   const ICONS = {
     eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     copy: '<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
@@ -528,11 +602,27 @@
     replace: '<path d="M4 12a8 8 0 0 1 14-5.3L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-14 5.3L4 15"/><path d="M4 20v-5h5"/>',
     trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
+    fileUp: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 17v-6"/><path d="M9.5 13.5L12 11l2.5 2.5"/>',
+    refresh: '<path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/>',
+    login: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/>',
     up: '<path d="M12 19V5"/><path d="M6 11l6-6 6 6"/>',
     down: '<path d="M12 5v14"/><path d="M6 13l6 6 6-6"/>',
     folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
     upload: '<path d="M12 16V5"/><path d="M7 10l5-5 5 5"/><path d="M5 20h14"/>',
     folderPlus: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v6M9 13h6"/>',
+    doc: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/>',
+    nodes: '<circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="12" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v10M11 11.5L6.2 17.4M13 11.5l4.8 5.9"/>',
+    code: '<path d="M8 8l-4 4 4 4"/><path d="M16 8l4 4-4 4"/><path d="M14 5l-4 14"/>',
+    server: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+    flask: '<path d="M9 3h6"/><path d="M10 3v6l-5.6 9.5A1.7 1.7 0 0 0 5.9 21h12.2a1.7 1.7 0 0 0 1.5-2.5L14 9V3"/><path d="M7.2 15h9.6"/>',
+    check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    play: '<path d="M8 5.5v13l10.5-6.5z"/>',
+    inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+    chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1.1-4.4A8 8 0 1 1 21 12z"/>',
+    fileCheck: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 14.5l2 2 4-4"/>',
+    diff: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 10.5v5M9.5 13h5"/><path d="M9.5 18h5"/>',
+    pause: '<path d="M9 6v12M15 6v12"/>',
+    alert: '<path d="M12 6v8"/><path d="M12 18h.01"/>',
     paste: '<rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="M9 11h6M9 15h4"/>',
   };
   const icon = (n) => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n]}</svg>`;
@@ -570,9 +660,9 @@
       return [
         iconBtn('eye', 'Ver', 'view-doc', data),
         iconBtn('copy', 'Copiar caminho', 'copy-doc-path', data),
-        iconBtn('finder', 'Mostrar no Finder', 'reveal-doc', data),
+        iconBtn('finder', `Mostrar no ${FINDER}`, 'reveal-doc', data),
         iconBtn('download', 'Descarregar', 'download-doc', data),
-        iconBtn('replace', 'Substituir por uma versão nova', 'replace-doc', data, busy),
+        iconBtn('fileUp', 'Substituir por outro ficheiro…', 'replace-doc', data, busy),
         '<span class="sep"></span>',
         iconBtn('trash', 'Tirar da tarefa', rel ? 'rm-doc-file' : 'rm-doc', data, busy),
       ].join('');
@@ -581,7 +671,7 @@
       const data = `data-id="${esc(d.id)}" data-rel=""`;
       return [
         iconBtn('plus', 'Juntar ficheiros a esta pasta', 'add-to-folder', data, busy),
-        iconBtn('finder', 'Mostrar no Finder', 'reveal-doc', data),
+        iconBtn('finder', `Mostrar no ${FINDER}`, 'reveal-doc', data),
         iconBtn('download', 'Descarregar a pasta (zip)', 'download-doc', data),
         '<span class="sep"></span>',
         iconBtn('trash', 'Tirar a pasta da tarefa', 'rm-doc', data, busy),
@@ -1026,12 +1116,15 @@
     if (!state.root) reasons.push('define a pasta raiz nas Definições');
     if (!f.links.length) reasons.push('liga pelo menos um agente a este passo, na página Agentes');
     if (otherRunning) reasons.push('há outro passo desta tarefa a correr');
+    if (!cliFound(cliNow())) reasons.push(`o ${CLI_NAME[cliNow()]} não está neste computador: escolhe o outro em "Agentes em", no topo`);
+    else if (state.auth && state.auth.cli === cliNow() && state.auth.loggedIn === false) reasons.push(`o ${CLI_NAME[cliNow()]} não tem sessão iniciada: carrega no ícone de entrar, no topo`);
     const canStart = !reasons.length && ['idle', 'done', 'failed', 'stopped', 'interrupted'].includes(f.status);
     const i = f.links.length ? selOf(t, def) : 0;
     const link = f.links[i];
     const mode = modeOf(def);
 
     // à esquerda: a sequência, com o modelo e as permissões de cada agente
+    const single = f.links.length === 1;
     const seq = f.links.map((l, n) => {
       const st = l.settings || { model: '', perm: 'ask' };
       const used = { model: l.model !== undefined && running ? l.model : st.model, perm: l.perm !== undefined && running ? l.perm : st.perm };
@@ -1040,7 +1133,11 @@
           <label class="f">Modelo · ${l.tool === 'copilot' ? 'Copilot CLI' : 'Claude Code'}<select data-setting="model" data-agent="${esc(l.agentId)}"${off}>${(() => { const opts = modelOpts(l.tool); return (opts.some((o) => o[0] === used.model) ? opts : [...opts, [used.model, used.model]]).map(([v, lab]) => `<option value="${esc(v)}" ${used.model === v ? 'selected' : ''}>${esc(lab)}</option>`).join(''); })()}</select></label>
           <label class="f">Permissões<select data-setting="perm" data-agent="${esc(l.agentId)}"${off}>${PERM_OPTS.map(([v, lab]) => `<option value="${v}" ${used.perm === v ? 'selected' : ''}>${lab}</option>`).join('')}</select></label>
           <div class="perm-help" data-help="${esc(l.agentId)}">${esc(permHelp(used.perm))}</div></div>`;
-      return `<div class="seq-row${n === i ? ' active' : ''}"><button class="seq-pick" type="button" data-sel="${n}"><span class="seq-n">${n + 1}</span><span class="seq-main"><span class="seq-title"><span class="seq-name"><span class="dim">Agente:</span> <b>${esc(l.name)}</b></span>${statusPill(l.status)}</span>${l.pause || l.tokens ? `<span class="seq-meta">${l.pause ? '<span class="pill" title="A sequência pára depois deste agente até aprovares">pausa depois</span>' : ''}${l.tokens ? `<span class="dim">${esc(tokens(l.tokens))}</span>` : ''}</span>` : ''}</span></button>${choices}</div>`;
+      // o que fica por baixo do nome: a pausa e os tokens
+      const meta = l.pause || l.tokens ? `<span class="seq-meta">${l.pause ? '<span class="pill" title="A sequência pára depois deste agente até aprovares">pausa depois</span>' : ''}${l.tokens ? `<span class="dim">${esc(tokens(l.tokens))}</span>` : ''}</span>` : '';
+      // um só agente: o nome e o estado vão para o cabeçalho do cartão; aqui ficam só a pausa, os tokens e as escolhas
+      if (single) return `<div class="seq-row solo">${meta ? `<div class="seq-solo-meta">${meta}</div>` : ''}${choices}</div>`;
+      return `<div class="seq-row${n === i ? ' active' : ''}"><button class="seq-pick" type="button" data-sel="${n}"><span class="seq-main"><span class="seq-title"><span class="seq-name"><span class="dim">Agente:</span> <b>${esc(l.name)}</b></span>${statusPill(l.status)}</span>${meta}</span></button>${choices}</div>`;
     }).join('');
     const inSummary = state.inputs ? `<button class="in-summary" type="button" data-mode="entradas">${icon('eye')}<span>${state.inputs.on === state.inputs.total ? `Recebem ${state.inputs.total} documento${state.inputs.total === 1 ? '' : 's'}` : `Recebem ${state.inputs.on} de ${state.inputs.total} documentos`}</span><span class="dim">Entradas</span></button>` : '';
     const controls = `${inSummary}<div class="step-acts">
@@ -1056,7 +1153,7 @@
         ${touched.length ? `<p><code>${esc(t.branch)}</code></p>` : `<div class="row" style="flex-wrap:nowrap"><input type="text" id="branch-in" value="${esc(t.branch)}" autocomplete="off" spellcheck="false"><button class="btn" data-act="save-branch" type="button" style="height:34px">Guardar</button></div>`}
         <p class="hint mt">${touched.length ? `Criado em ${touched.length} microserviço${touched.length === 1 ? '' : 's'}. Sem push.` : 'Criado em cada microserviço antes da primeira alteração do agente; recusado se esse microserviço tiver alterações por guardar. Sem push.'}</p></div></div>` : '';
     const left = `<div class="step2-side">
-      <div class="card"><div class="card-head"><h2>Sequência</h2></div><div class="seq">${seq || '<p class="muted" style="padding:12px">Sem agentes. Liga-os na página Agentes.</p>'}</div><div class="card-body">${controls}</div></div>
+      <div class="card"><div class="card-head">${single ? `<h2 class="seq-head" title="${esc(f.links[0].name)}"><span class="dim">Agente:</span> ${esc(f.links[0].name)}</h2>${statusPill(f.links[0].status)}` : `<h2>Sequência</h2>${f.links.length ? `<span class="pill">${f.links.length} agentes</span>` : ''}`}</div><div class="seq">${seq || '<p class="muted" style="padding:12px">Sem agentes. Liga-os na página Agentes.</p>'}</div><div class="card-body">${controls}</div></div>
       ${branchCard}</div>`;
 
     // à direita: avisos, e Conversa · Produzido · Alterações
@@ -1068,8 +1165,8 @@
     const nDocs = state.outputsAll.reduce((s, o) => s + o.files.length, 0);
     const nFiles = state.changes ? allFiles().length : null;
     const nIn = state.inputs ? (state.inputs.on === state.inputs.total ? state.inputs.total : `${state.inputs.on}/${state.inputs.total}`) : null;
-    const tabs = [['entradas', 'Entradas', nIn], ['conversa', 'Conversa', null], ['produzido', 'Produzido', nDocs], ...(def.branch ? [['alteracoes', 'Alterações', nFiles]] : [])];
-    const seg = `<div class="seg big">${tabs.map(([v, lab, c]) => `<button type="button" data-mode="${v}" class="${mode === v ? 'active' : ''}">${lab}${c != null ? ` <span class="pill">${c}</span>` : ''}</button>`).join('')}</div>`;
+    const tabs = [['entradas', 'Entradas', nIn, 'inbox'], ['conversa', 'Conversa', null, 'chat'], ['produzido', 'Produzido', nDocs, 'fileCheck'], ...(def.branch ? [['alteracoes', 'Alterações', nFiles, 'diff']] : [])];
+    const seg = `<div class="seg big">${tabs.map(([v, lab, c, ic]) => `<button type="button" data-mode="${v}" class="${mode === v ? 'active' : ''}">${icon(ic)}${lab}${c != null ? ` <span class="pill">${c}</span>` : ''}</button>`).join('')}</div>`;
 
     let headExtra = '';
     let body;
@@ -1082,9 +1179,8 @@
         // a conversa continua sempre que nada corre na tarefa: também depois de o agente ter terminado
         const canReply = live || (Boolean(link.sessionId) && !t.running && link.status !== 'pending');
         headExtra = `<span class="row run-actions">${[
-          f.current === i && !otherRunning && (live || link.status === 'waiting' || stuck) ? '<button class="btn small" data-act="done-link" type="button" title="Dá este agente por terminado e segue para o próximo">Dar por terminado</button>' : '',
-          !t.running && link.sessionId && stuck ? '<button class="btn small" data-act="resume-link" type="button">Retomar</button>' : '',
-          !t.running && link.status !== 'pending' ? '<button class="btn small" data-act="retry-link" type="button" title="Corre este agente de novo, sem a conversa anterior">Repetir</button>' : '',
+          f.current === i && !otherRunning && (live || link.status === 'waiting' || stuck) ? `<button class="ib good" data-act="done-link" type="button" data-tip="Dar por terminado (segue para o próximo)" aria-label="Dar este agente por terminado e seguir para o próximo">${icon('check')}</button>` : '',
+          !t.running && link.sessionId && stuck ? `<button class="ib accent" data-act="resume-link" type="button" data-tip="Retomar a conversa onde parou" aria-label="Retomar a conversa do agente onde parou">${icon('play')}</button>` : '',
         ].join('')}</span>`;
         body = `${link.error ? `<div class="banner bad"><div class="grow">${esc(link.error)}</div></div>` : ''}
           <div class="console-body chat" id="console-body" aria-live="polite">${consoleHtml(state.entries, link.name) || '<div class="console-empty">Aqui aparece, ao vivo, o que o agente diz, lê, escreve e corre.</div>'}</div>
@@ -1135,11 +1231,11 @@
       const data = (p) => `data-id="${esc(x.id)}" data-agfile="${esc(p)}"`;
       const files = (x.files || []).map((f) => `<div class="ag-file${f.kind === 'ref' ? ' sub' : ''}${f.missing ? ' missing' : ''}">
           <span class="kind ${f.kind}">${KIND[f.kind]}</span><span class="fname" title="${esc(f.path)}">${esc(f.rel)}</span>
-          <span class="acts">${f.missing ? '<span class="pill bad">não encontrado</span>' : iconBtn('eye', 'Ver', 'view-agent-file', data(f.path))}${f.kind === 'ref' ? '' : iconBtn('copy', 'Copiar caminho', 'copy-agent-path', data(f.path)) + (f.missing ? '' : iconBtn('finder', 'Mostrar no Finder', 'reveal-agent-file', data(f.path)))}</span></div>`).join('');
+          <span class="acts">${f.missing ? '<span class="pill bad">não encontrado</span>' : iconBtn('eye', 'Ver', 'view-agent-file', data(f.path))}${f.kind === 'ref' ? '' : iconBtn('copy', 'Copiar caminho', 'copy-agent-path', data(f.path)) + (f.missing ? '' : iconBtn('finder', `Mostrar no ${FINDER}`, 'reveal-agent-file', data(f.path)))}</span></div>`).join('');
       return `<article class="ag-card">
         <div class="ag-head">
           ${step ? `<span class="seq-n">${n + 1}</span>` : ''}<span class="ag-name" title="${esc(x.description || '')}">${esc(x.name)}</span>
-          <label class="ag-runner" title="O CLI que corre este agente. Os ficheiros servem aos dois: a plataforma dá-lhe as instruções no pedido.">Corre em <select data-runner="${esc(x.id)}" aria-label="CLI que corre ${esc(x.name)}">${[['claude', 'Claude Code'], ['copilot', 'Copilot CLI']].map(([v, n]) => `<option value="${v}" ${x.runner === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>${x.kind === 'agent' ? '' : '<span class="pill mauve">só skill</span>'}
+${x.kind === 'agent' ? '' : '<span class="pill mauve">só skill</span>'}
           <span class="ag-acts">
             ${step ? `${iconBtn('up', 'Subir na sequência', 'move-agent', `data-id="${esc(x.id)}" data-dir="-1"`, n === 0)}${iconBtn('down', 'Descer na sequência', 'move-agent', `data-id="${esc(x.id)}" data-dir="1"`, n === items.length - 1)}<span class="vsep"></span>` : ''}
             <select data-step-of="${esc(x.id)}" aria-label="Passo de ${esc(x.name)}">${stepOpts(x)}</select>
@@ -1147,7 +1243,7 @@
             <span class="vsep"></span>${iconBtn('trash', 'Tirar da plataforma', 'rm-agent', `data-id="${esc(x.id)}"`)}
           </span>
         </div>
-        <div class="ag-crumbs" title="${esc(x.base || '')}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS.folder}</svg>${crumbs(x.base)}${iconBtn('finder', 'Mostrar a pasta no Finder', 'reveal-agent-file', data(x.base || ''))}${iconBtn('copy', 'Copiar caminho da pasta', 'copy-agent-path', data(x.base || ''))}</div>
+        <div class="ag-crumbs" title="${esc(x.base || '')}"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS.folder}</svg>${crumbs(x.base)}${iconBtn('finder', `Mostrar a pasta no ${FINDER}`, 'reveal-agent-file', data(x.base || ''))}${iconBtn('copy', 'Copiar caminho da pasta', 'copy-agent-path', data(x.base || ''))}${iconBtn('refresh', 'Ler a pasta de novo', 'refresh-agent', `data-id="${esc(x.id)}"`)}</div>
         <div class="ag-files">${files || '<p class="muted">Sem ficheiros.</p>'}</div>
       </article>`;
     };
@@ -1501,6 +1597,12 @@
   }
 
   const actions = {
+    // iniciar sessão no CLI escolhido: abre um terminal com o login; ao voltar à janela, vê-se outra vez
+    'cli-login': async () => {
+      const name = CLI_NAME[cliNow()];
+      if (await call(api.app.login(cliNow()))) toast(`Abri um terminal com o login do ${name}. Entra na conta no browser e volta aqui.`);
+    },
+    'cli-recheck': () => checkAuth(true),
     // mudar o nome da tarefa, ali mesmo no cabeçalho (Enter guarda, Esc cancela)
     'rename-task': () => {
       const h = $('#task-title');
@@ -1612,10 +1714,6 @@
     'continue-step': async () => { if (await call(api.pipeline.continue(taskId(), stepId()))) await reloadTask({ light: true }); },
     'done-link': async () => { if (await call(api.pipeline.done(taskId(), stepId(), linkIndex()))) await reloadTask({ light: true }); },
     'resume-link': async () => { if (await call(api.pipeline.resume(taskId(), stepId(), linkIndex()))) await reloadTask({ light: true }); },
-    'retry-link': async () => {
-      if (!(await confirmBox('Repetir o agente', 'Este agente corre de novo, sem a conversa anterior, e os seguintes voltam a esperar a vez.', 'Repetir'))) return;
-      if (await call(api.pipeline.retry(taskId(), stepId(), linkIndex()))) await reloadTask();
-    },
     'send-doubts': async () => {
       const box = $('#doubts-box');
       if (!box) return;
@@ -1693,6 +1791,14 @@
       if (r) viewText(r.name, r.binary ? `${size(r.size)} · ficheiro binário` : `${size(r.size)}${r.truncated ? ' · mostra-se só o início' : ''}`, r.binary ? 'Este ficheiro não é texto.' : r.text);
     },
     'reveal-agent-file': async (el) => { await call(api.agents.reveal(el.dataset.id, el.dataset.agfile)); },
+    // lê de novo a pasta do agente (ficheiros novos ou apagados, nome e descrição mudados)
+    'refresh-agent': async (el) => {
+      const r = await call(api.agents.refresh(el.dataset.id));
+      if (!r) return;
+      await loadAgents();
+      renderAgents();
+      toast(`Pasta lida de novo: ${r.files} ficheiro${r.files === 1 ? '' : 's'}`);
+    },
     'copy-agent-path': async (el) => {
       try {
         await navigator.clipboard.writeText(el.dataset.agfile);
@@ -1730,7 +1836,7 @@
     if (tab && state.task) {
       state.tab = tab.dataset.tab;
       state.tabOf[state.task.id] = state.tab;
-      $$('.tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === state.tab));
+      $$('.step-arrow').forEach((x) => { x.classList.toggle('active', x.dataset.tab === state.tab); x.setAttribute('aria-selected', String(x.dataset.tab === state.tab)); });
       await renderPanel();
       return;
     }
@@ -1793,6 +1899,18 @@
     if (seg) { state.newTask.type = seg.dataset.v; $$('#mt-type button').forEach((b) => b.classList.toggle('active', b === seg)); return; }
     const unpick = e.target.closest('[data-unpick]');
     if (unpick) { const [kind, i] = unpick.dataset.unpick.split(':'); state.newTask[kind].splice(Number(i), 1); renderPicked(); }
+  });
+
+  // o CLI que corre todos os agentes: guarda-se, e a página volta a desenhar o que depende dele (modelos, avisos)
+  $('#cli-pick').addEventListener('change', async (e) => {
+    const value = e.target.value;
+    const r = await call(api.settings.setCli(value));
+    if (!r) { syncCliPick(); return; }
+    if (state.info) state.info.cli = r.cli;
+    syncCliPick();
+    checkAuth();
+    toast(`Os agentes passam a correr no ${CLI_NAME[r.cli]}${cliFound(r.cli) ? '' : ', que não está neste computador'}`, !cliFound(r.cli));
+    if (state.view === 'tarefa' && state.task) await reloadTask({ light: true }); // só mudam os modelos e o que se pode fazer
   });
 
   document.addEventListener('change', async (e) => {
@@ -2089,7 +2207,7 @@
         state.tabOf[t.id] = e.step;
         state.mode[e.step] = 'conversa';
         state.sel[e.step] = e.index;
-        $$('.tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === state.tab));
+        $$('.step-arrow').forEach((x) => { x.classList.toggle('active', x.dataset.tab === state.tab); x.setAttribute('aria-selected', String(x.dataset.tab === state.tab)); });
         await renderPanel();
       }
       if (fresh) focusPending();
@@ -2116,7 +2234,7 @@
   }
   (async () => {
     loadInfo(); // os --version dos programas: em fundo, a barra lateral mostra-os quando chegarem
-    await Promise.all([loadAgents(), loadServices()]);
+    await Promise.all([loadAgents(true), loadServices()]);
     await route();
   })();
 })();

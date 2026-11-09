@@ -1,4 +1,5 @@
-// Definições da plataforma, em data/settings.json. Por agora uma: a pasta raiz onde estão todos os microserviços.
+// Definições da plataforma, em data/settings.json: a pasta raiz onde estão todos os microserviços, e o CLI que corre
+// todos os agentes (Claude Code ou Copilot CLI), escolhido no topo da página.
 // É a partir dela que correm os agentes: cada microserviço é uma subpasta, e um agente que lê um vê os outros ao lado.
 const fs = require('fs');
 const path = require('path');
@@ -26,6 +27,18 @@ function setRoot(dataDir, folder) {
   return root;
 }
 
+const CLIS = ['claude', 'copilot'];
+// O CLI que corre os agentes: o escolhido, ou '' enquanto ninguém escolheu (a app escolhe o que está instalado)
+const cli = (dataDir) => {
+  const v = read(dataDir).cli;
+  return CLIS.includes(v) ? v : '';
+};
+function setCli(dataDir, value) {
+  if (!CLIS.includes(value)) throw new Error('CLI desconhecido');
+  writeJson(file(dataDir), { ...read(dataDir), cli: value });
+  return value;
+}
+
 function register(ipcMain, { dataDir, dialog, getWindow }) {
   const guard = (fn) => async (_, ...args) => {
     try {
@@ -36,10 +49,11 @@ function register(ipcMain, { dataDir, dialog, getWindow }) {
   };
   ipcMain.handle('settings:get', guard(() => ({ rootDir: read(dataDir).rootDir || '', rootExists: Boolean(rootDir(dataDir)) })));
   ipcMain.handle('settings:set-root', guard((folder) => ({ rootDir: setRoot(dataDir, folder) })));
+  ipcMain.handle('settings:set-cli', guard((value) => ({ cli: setCli(dataDir, String(value || '')) })));
   ipcMain.handle('settings:pick-root', guard(async () => {
     const r = await dialog.showOpenDialog(getWindow(), { title: 'Pasta raiz dos microserviços', properties: ['openDirectory'] });
     return { folder: r.canceled ? null : r.filePaths[0] };
   }));
 }
 
-module.exports = { register, rootDir, setRoot };
+module.exports = { register, rootDir, setRoot, cli, setCli };

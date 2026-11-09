@@ -329,4 +329,63 @@ async function copilotModels() {
   return modelsCache;
 }
 
-module.exports = { startCopilotSession, copilotModels, toolOf, inputsOf };
+// O Copilot CLI tem sessão iniciada? Não há um comando de estado: pergunta-se pelo ACP a lista das sessões, que só lê
+// e que o Copilot recusa sem sessão iniciada. { loggedIn: true | false | null (não se sabe), detail }
+async function copilotAuth() {
+  const c = await shell.findCli('copilot');
+  if (!c.found) return { loggedIn: null, detail: 'o Copilot CLI não está neste computador' };
+  const env = shell.agentEnv(await shell.loginShellEnv());
+  return new Promise((resolve) => {
+    const args = ['--acp', '--no-auto-update', '--no-color'];
+    let child;
+    try {
+      child = spawn(c.file, c.shell ? args.map(quote) : args, { env, windowsHide: true, detached: !shell.IS_WIN, shell: Boolean(c.shell), stdio: ['pipe', 'pipe', 'ignore'] });
+    } catch (e) {
+      resolve({ loggedIn: null, detail: e.message });
+      return;
+    }
+    let done = false;
+    let buf = '';
+    let next = 0;
+    const waiting = new Map();
+    const finish = (r) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      shell.killTree(child);
+      resolve(r);
+    };
+    const timer = setTimeout(() => finish({ loggedIn: null, detail: 'o Copilot CLI não respondeu' }), 30000);
+    child.on('error', (e) => finish({ loggedIn: null, detail: e.message }));
+    child.on('exit', () => finish({ loggedIn: null, detail: 'o Copilot CLI fechou sem responder' }));
+    child.stdout.on('data', (chunk) => {
+      buf += chunk;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        try {
+          const m = JSON.parse(line);
+          if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
+        } catch {
+          // não é uma resposta
+        }
+      }
+    });
+    const request = (method, params) => new Promise((r) => {
+      const id = ++next;
+      waiting.set(id, r);
+      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+    });
+    (async () => {
+      const init = await request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } });
+      if (init.error) return finish({ loggedIn: null, detail: String(init.error.message || '') });
+      const list = await request('session/list', {});
+      if (!list.error) return finish({ loggedIn: true });
+      const why = String(list.error.message || '');
+      return finish({ loggedIn: /auth|log ?in|sign.?in|unauthori|credential|token/i.test(why) ? false : null, detail: why.slice(0, 200) });
+    })();
+  });
+}
+
+module.exports = { startCopilotSession, copilotModels, copilotAuth, toolOf, inputsOf };

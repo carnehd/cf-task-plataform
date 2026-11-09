@@ -147,6 +147,47 @@ function add(dataDir, { folder, items, step }) {
   return made;
 }
 
+const isFileAt = (f) => {
+  try {
+    return fs.statSync(f).isFile();
+  } catch {
+    return false;
+  }
+};
+
+// Lê de novo a pasta de um agente: o nome, a descrição e as ferramentas do ficheiro do agente (ou da skill), e as
+// skills do pack (<raiz>/skills/*/SKILL.md) que nenhum outro agente usa; as que já não estão na pasta saem. As
+// referências não se guardam: lêem-se do disco a cada listagem.
+function refresh(dataDir, id) {
+  const agents = list(dataDir);
+  const me = agents.find((a) => a.id === id);
+  if (!me) throw new Error('Esse agente já não existe');
+  const main = me.agentFile || (me.skillFiles || [])[0];
+  if (!main || !isFileAt(main)) throw new Error('O ficheiro do agente já não está na pasta');
+  const { head } = frontmatter(fs.readFileSync(main, 'utf8').slice(0, MAX_TEXT));
+  if (head.name) me.name = String(head.name).slice(0, 80);
+  me.description = String(head.description || '').slice(0, 300);
+  me.tools = toolsOf(head);
+  const skills = (me.skillFiles || []).filter(isFileAt);
+  if (me.agentFile) {
+    const packSkills = path.join(path.dirname(path.dirname(me.agentFile)), 'skills');
+    const taken = new Set(agents.filter((a) => a.id !== id).flatMap((a) => a.skillFiles || []));
+    let entries = [];
+    try {
+      entries = fs.readdirSync(packSkills, { withFileTypes: true });
+    } catch {
+      // o pack não tem skills
+    }
+    for (const e of entries) {
+      const f = path.join(packSkills, e.name, 'SKILL.md');
+      if (e.isDirectory() && !taken.has(f) && !skills.includes(f) && isFileAt(f)) skills.push(f);
+    }
+  }
+  me.skillFiles = skills;
+  saveList(dataDir, agents);
+  return { agent: me, files: filesOf(me).files.length };
+}
+
 // Passa um agente para outro passo (ou para nenhum), no fim da sequência desse passo
 function setStep(dataDir, id, step) {
   const agents = list(dataDir);
@@ -294,7 +335,8 @@ function register(ipcMain, { dataDir, dialog, getWindow, revealPath }) {
       return { error: String((e && e.message) || e) };
     }
   };
-  ipcMain.handle('agents:list', guard(() => ({ agents: list(dataDir).map((a) => ({ ...a, ...filesOf(a) })), steps: steps.STEPS.map((s) => ({ id: s.id, name: s.name })) })));
+  // light: sem os ficheiros de cada agente (percorrer as pastas leva tempo; só a página Agentes os mostra)
+  ipcMain.handle('agents:list', guard((light) => ({ agents: list(dataDir).map((a) => (light ? { ...a } : { ...a, ...filesOf(a) })), steps: steps.STEPS.map((s) => ({ id: s.id, name: s.name })) })));
   ipcMain.handle('agents:read-file', guard((id, file) => {
     const f = fileOf(dataDir, id, file);
     if (!f.rel) throw new Error('Isso é uma pasta');
@@ -321,6 +363,7 @@ function register(ipcMain, { dataDir, dialog, getWindow, revealPath }) {
   ipcMain.handle('agents:set-pause', guard((id, pause) => ({ agent: setPause(dataDir, String(id), Boolean(pause)) })));
   ipcMain.handle('agents:remove', guard((id) => { remove(dataDir, String(id)); return { ok: true }; }));
   ipcMain.handle('agents:set-runner', guard((id, runner) => ({ agent: setRunner(dataDir, String(id), String(runner || '')) })));
+  ipcMain.handle('agents:refresh', guard((id) => refresh(dataDir, String(id))));
 }
 
 module.exports = { register, list, get, sequence, setDefaults, instructionsOf, frontmatter, scan };

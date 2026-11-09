@@ -4,15 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'">
-<title>Estaleiro</title>
+<title>Beekeeper</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%232563eb'/><stop offset='1' stop-color='%237c3aed'/></linearGradient></defs><rect width='32' height='32' rx='8' fill='url(%23g)'/><g transform='translate(4 4)' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3l3.5 2v4L12 11 8.5 9V5z'/><path d='M7.5 11l3.5 2v4l-3.5 2L4 17v-4z'/><path d='M16.5 11l3.5 2v4l-3.5 2-3.5-2v-4z'/></g></svg>">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <div class="app">
   <nav class="rail" id="rail" aria-label="Secções">
-    <button class="rail-logo" id="rail-logo" type="button" title="Estaleiro: abre e fecha os nomes">
-      <span class="rail-logo-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16M6 19V9h12v10M6 9l6-5 6 5M12 9v10"/></svg></span>
-      <span class="rail-label">Estaleiro</span>
+    <button class="rail-logo" id="rail-logo" type="button" title="Beekeeper: abre e fecha os nomes">
+      <span class="rail-logo-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l3.5 2v4L12 11 8.5 9V5z"/><path d="M7.5 11l3.5 2v4l-3.5 2L4 17v-4z"/><path d="M16.5 11l3.5 2v4l-3.5 2-3.5-2v-4z"/></svg></span>
+      <span class="rail-label">Beekeeper</span>
     </button>
     <a class="rail-btn" href="#tarefas" data-view="tarefas" title="Tarefas"><svg viewBox="0 0 24 24"><path d="M3.5 5.5l1.5 1.5l2.5-2.5"/><path d="M3.5 11.5l1.5 1.5l2.5-2.5"/><path d="M3.5 17.5l1.5 1.5l2.5-2.5"/><path d="M11 6h9"/><path d="M11 12h9"/><path d="M11 18h9"/></svg><span class="rail-label">Tarefas</span><span class="count" id="count-tarefas"></span></a>
     <a class="rail-btn" href="#agentes" data-view="agentes" title="Agentes"><svg viewBox="0 0 24 24"><path d="M6 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2z"/><path d="M12 2v2"/><path d="M9 12v9"/><path d="M15 12v9"/><path d="M5 16l4-2"/><path d="M15 14l4 2"/><path d="M9 18h6"/><path d="M10 8v.01"/><path d="M14 8v.01"/></svg><span class="rail-label">Agentes</span><span class="count" id="count-agentes"></span></a>
@@ -26,7 +27,11 @@
     <header class="topbar">
       <div class="crumbs"><span class="crumb-mode" id="crumb-mode">Tarefas</span><span class="crumb-sep" id="crumb-sep" hidden>/</span><span class="crumb-ctx" id="crumb-ctx"></span><span class="busy" id="crumb-busy" hidden><span class="spinner" aria-hidden="true"></span><span id="crumb-busy-text">a analisar</span></span></div>
       <span></span>
-      <div class="topbar-right"><span class="hotkey-badge" id="version-badge"></span></div>
+      <div class="topbar-right">
+        <label class="cli-pick" title="O CLI que corre todos os agentes. Os ficheiros dos agentes servem aos dois; muda a partir do próximo agente que começar."><span>Agentes em</span><select id="cli-pick" aria-label="CLI que corre os agentes"><option value="claude">Claude Code</option><option value="copilot">Copilot CLI</option></select></label>
+        <span class="cli-auth" id="cli-auth" aria-live="polite"></span>
+        <span class="hotkey-badge" id="version-badge"></span>
+      </div>
     </header>
 
     <div class="views">
@@ -169,12 +174,22 @@
 
 <!-- Escolher pasta ou ficheiros: só no browser (na janela Electron abre o diálogo do sistema) -->
 <div class="overlay" id="modal-fs" role="dialog" aria-modal="true" aria-labelledby="fs-title">
-  <div class="modal">
-    <header><h2 id="fs-title">Escolher pasta</h2><button class="btn small" id="fs-cancel" type="button">Cancelar</button></header>
-    <div class="row" style="flex-wrap:nowrap"><button class="btn" id="fs-up" type="button" title="Pasta acima" style="height:34px">↑</button><input type="text" id="fs-path" autocomplete="off" spellcheck="false"><button class="btn" id="fs-go" type="button" style="height:34px">Ir</button></div>
-    <div class="fs-list" id="fs-list"></div>
-    <footer><span class="hint" id="fs-hint" style="margin-right:auto"></span><button class="btn primary" id="fs-ok" type="button">Escolher esta pasta</button></footer>
-  </div>
+  <section class="fs-modal">
+    <header class="fs-head"><h2 id="fs-title">Escolher pasta</h2><button class="icon-action" type="button" data-close title="Fechar (Esc)" aria-label="Fechar"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></header>
+    <div class="fs-body">
+      <nav class="fs-places" id="fs-places" aria-label="Atalhos"></nav>
+      <div class="fs-main">
+        <div class="fs-bar">
+          <button class="icon-action" id="fs-up" type="button" title="Pasta acima" aria-label="Pasta acima"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M4 7l4-4 4 4"/></svg></button>
+          <div class="fs-crumbs" id="fs-crumbs" title="Clica no caminho para o escrever"></div>
+          <input type="text" id="fs-path" class="fs-path" autocomplete="off" spellcheck="false" aria-label="Caminho da pasta" hidden>
+          <input type="search" id="fs-filter" class="fs-filter" placeholder="Filtrar…" autocomplete="off" spellcheck="false" aria-label="Filtrar esta pasta">
+        </div>
+        <div class="fs-list" id="fs-list" role="listbox" aria-multiselectable="true"></div>
+      </div>
+    </div>
+    <footer class="fs-foot"><span class="hint" id="fs-hint"></span><button class="btn" id="fs-cancel" type="button">Cancelar</button><button class="btn primary" id="fs-ok" type="button">Escolher esta pasta</button></footer>
+  </section>
 </div>
 
 <div class="drop-overlay" id="drop-overlay" hidden><div class="drop-box"><b>Larga aqui para juntar à tarefa</b><span>Ficheiros ou pastas. A plataforma guarda uma cópia; o original fica onde está.</span></div></div>

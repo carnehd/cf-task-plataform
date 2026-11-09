@@ -4,7 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const invoke = (channel) => (...args) => ipcRenderer.invoke(channel, ...args);
 
 contextBridge.exposeInMainWorld('estaleiro', {
-  app: { info: invoke('app:info'), openPath: invoke('app:open-path') },
+  app: { info: invoke('app:info'), openPath: invoke('app:open-path'), auth: invoke('app:auth'), login: invoke('app:login') },
   agents: {
     list: invoke('agents:list'),
     pickFolder: invoke('agents:pick-folder'),
@@ -15,12 +15,14 @@ contextBridge.exposeInMainWorld('estaleiro', {
     setPause: invoke('agents:set-pause'),
     remove: invoke('agents:remove'),
     setRunner: invoke('agents:set-runner'),
+    refresh: invoke('agents:refresh'),
     readFile: invoke('agents:read-file'),
     reveal: invoke('agents:reveal'),
   },
   settings: {
     get: invoke('settings:get'),
     setRoot: invoke('settings:set-root'),
+    setCli: invoke('settings:set-cli'),
     pickRoot: invoke('settings:pick-root'),
   },
   services: {

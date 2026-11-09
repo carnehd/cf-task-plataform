@@ -959,3 +959,93 @@ tr:last-child td { border-bottom: 0; }
 .ib.bad { color: var(--red); }
 .ib.bad:hover:not(:disabled) { color: #fff; background: var(--red); border-color: var(--red); }
 .picked .item button { color: var(--red); }
+
+/* o CLI que corre todos os agentes, no topo à direita */
+.cli-pick { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-small); color: var(--topbar-muted); white-space: nowrap; }
+.cli-pick select { width: auto; height: 28px; padding: 0 8px; font-size: var(--fs-small); }
+.cli-pick.missing select { border-color: var(--red); color: var(--red); }
+
+/* a barra dos passos: setas encadeadas, cada uma um botão; a cor diz o estado e a escolhida fica azul */
+.steps-bar { display: flex; min-width: 0; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.step-arrow { --d: 14px; flex: 1 1 0; min-width: 0; height: 40px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 calc(var(--d) + 8px) 0 calc(var(--d) + 12px); margin-left: calc(4px - var(--d)); border: 0; cursor: pointer; font: inherit; font-size: var(--fs-body); font-weight: 600; background: var(--bg-hover); color: var(--text-muted); clip-path: polygon(0 0, calc(100% - var(--d)) 0, 100% 50%, calc(100% - var(--d)) 100%, 0 100%, var(--d) 50%); transition: background-color .15s, color .15s, filter .15s; }
+.step-arrow:first-child { margin-left: 0; padding-left: 14px; border-radius: 8px 0 0 8px; clip-path: polygon(0 0, calc(100% - var(--d)) 0, 100% 50%, calc(100% - var(--d)) 100%, 0 100%); }
+.step-arrow .ico { width: 18px; height: 18px; }
+.step-arrow .sa-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step-arrow .sa-mark { display: inline-flex; flex: none; }
+.step-arrow .sa-mark .ico { width: 15px; height: 15px; stroke-width: 2.4; }
+.step-arrow .sa-live { width: 8px; height: 8px; flex: none; border-radius: 50%; background: currentColor; animation: pulse 1.4s ease-in-out infinite; }
+.step-arrow:hover { filter: brightness(.96); }
+.step-arrow.done { background: color-mix(in srgb, var(--green) 14%, var(--bg)); color: var(--green); }
+.step-arrow.running { background: color-mix(in srgb, var(--accent) 12%, var(--bg)); color: var(--accent); }
+.step-arrow.waiting { background: color-mix(in srgb, var(--yellow) 16%, var(--bg)); color: var(--yellow); }
+.step-arrow.failed { background: color-mix(in srgb, var(--red) 12%, var(--bg)); color: var(--red); }
+.step-arrow.active { background: var(--accent); color: #fff; }
+.step-arrow.active:hover { filter: brightness(1.06); }
+.step-arrow:focus-visible { outline: none; text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 900px) { .step-arrow .sa-name { display: none; } .step-arrow { padding: 0 calc(var(--d) + 4px) 0 calc(var(--d) + 8px); } .step-arrow:first-child { padding-left: 10px; } }
+@media (prefers-reduced-motion: reduce) { .step-arrow .sa-live { animation: none; } }
+
+/* a sessão no CLI escolhido, ao lado do seletor */
+.cli-auth { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-small); color: var(--topbar-muted); white-space: nowrap; }
+.cli-auth .ib { width: 26px; height: 26px; }
+.cli-auth.off { color: var(--red); }
+.cli-auth.off .ib { color: var(--red); }
+.cli-auth.ok { color: var(--green); }
+
+/* o seletor de ficheiros e pastas do browser: atalhos à esquerda, caminho às fatias, lista com ícones, tamanho e data */
+.fs-modal { width: min(920px, 96vw); height: min(620px, 92vh); display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 18px 50px rgba(0, 0, 0, .18); overflow: hidden; }
+.fs-head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 18px; border-bottom: 1px solid var(--border); }
+.fs-head h2 { margin-right: auto; font-size: var(--fs-title); }
+.fs-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 190px minmax(0, 1fr); }
+.fs-places { display: flex; flex-direction: column; gap: 2px; padding: 10px 8px; border-right: 1px solid var(--border); background: var(--bg-surface); overflow-y: auto; }
+.fs-place { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: var(--radius-sm); background: none; cursor: pointer; color: var(--text-muted); font-size: var(--fs-body); text-align: left; }
+.fs-place span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-place:hover { background: var(--bg-hover); color: var(--text); }
+.fs-place.on { background: color-mix(in srgb, var(--accent) 12%, var(--bg)); color: var(--accent); font-weight: 600; }
+.fs-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.fs-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.fs-crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; overflow-x: auto; scrollbar-width: none; white-space: nowrap; cursor: text; padding: 2px 0; }
+.fs-crumbs::-webkit-scrollbar { display: none; }
+.fs-crumb { flex: none; border: 0; background: none; padding: 3px 6px; border-radius: var(--radius-sm); cursor: pointer; color: var(--text-muted); font-size: var(--fs-body); }
+.fs-crumb:hover { background: var(--bg-hover); color: var(--text); }
+.fs-crumb:last-child { color: var(--text); font-weight: 600; }
+.fs-sep { flex: none; color: var(--text-dim); }
+.fs-path { flex: 1; min-width: 0; height: 30px; }
+.fs-filter { width: 170px; flex: none; height: 30px; }
+.fs-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0; height: auto; border: 0; border-radius: 0; background: var(--bg); }
+.fs-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 80px 130px; align-items: center; gap: 10px; width: 100%; padding: 6px 14px; border: 0; border-bottom: 0; background: none; cursor: pointer; text-align: left; font-size: var(--fs-body); color: var(--text); }
+.fs-row.file { grid-template-columns: auto auto minmax(0, 1fr) 80px 130px; }
+.fs-row:hover { background: var(--bg-hover); }
+.fs-row.dir { font-weight: 400; }
+.fs-row.dir .fs-ico { color: var(--accent); }
+.fs-row.on { background: color-mix(in srgb, var(--accent) 10%, var(--bg)); }
+.fs-row.file.off { color: var(--text-dim); cursor: default; }
+.fs-row.file.off:hover { background: none; }
+.fs-row input { margin: 0; }
+.fs-ico { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; color: var(--text-dim); }
+.fs-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-meta { color: var(--text-dim); font-size: var(--fs-small); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fs-empty { padding: 18px; color: var(--text-dim); }
+.fs-foot { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
+.fs-foot .hint { margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 700px) { .fs-body { grid-template-columns: minmax(0, 1fr); } .fs-places { display: none; } .fs-row, .fs-row.file { grid-template-columns: auto auto minmax(0, 1fr); } .fs-row .fs-meta { display: none; } .fs-filter { width: 110px; } }
+/* os separadores do passo (Entradas, Conversa, Produzido, Alterações) com ícone */
+.seg.big button { display: inline-flex; align-items: center; gap: 6px; }
+.seg.big button .ico { width: 16px; height: 16px; }
+
+/* o cartão da sequência: sem numeração; com um só agente, o nome e o estado no cabeçalho; as escolhas encostadas à esquerda */
+.step2 .card-head .seq-head { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.step2 .card-head .seq-head + .pill { flex: none; margin-left: 4px; }
+.step2 .seq-pick { grid-template-columns: minmax(0, 1fr); }
+.step2 .choices { padding: 0 12px; }
+.step2 .seq-row.solo { padding-top: 10px; }
+.step2 .seq-solo-meta { padding: 0 12px; }
+
+/* as ações do agente na conversa, em ícones: terminar (verde) e retomar (azul) */
+.run-actions { gap: 6px; }
+.run-actions .ib { width: 32px; height: 32px; border: 1px solid var(--border); background: var(--bg); }
+.run-actions .ib .ico { width: 17px; height: 17px; stroke-width: 2.2; }
+.ib.good { color: var(--green); }
+.ib.good:hover:not(:disabled) { color: #fff; background: var(--green); border-color: var(--green); }
+.ib.accent { color: var(--accent); }
+.ib.accent:hover:not(:disabled) { color: #fff; background: var(--accent); border-color: var(--accent); }

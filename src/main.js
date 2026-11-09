@@ -11,7 +11,8 @@ const APP_DIR = path.join(__dirname, '..');
 // O .exe portátil descompacta a app numa pasta temporária e apaga-a quando a app fecha: a pasta data tem de ficar ao
 // lado do .exe verdadeiro, que o lançador indica em PORTABLE_EXECUTABLE_DIR (e não ao lado do programa que corre)
 const EXE_DIR = process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(process.execPath);
-const DATA_DIR = process.env.ESTALEIRO_DATA ? path.resolve(process.env.ESTALEIRO_DATA) : app.isPackaged ? path.join(EXE_DIR, 'data') : path.join(APP_DIR, 'data');
+const DATA_ENV = process.env.BEEKEEPER_DATA || process.env.ESTALEIRO_DATA; // ESTALEIRO_DATA: o nome antigo, continua a valer
+const DATA_DIR = DATA_ENV ? path.resolve(DATA_ENV) : app.isPackaged ? path.join(EXE_DIR, 'data') : path.join(APP_DIR, 'data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 app.setPath('userData', path.join(DATA_DIR, 'electron'));
 
@@ -28,7 +29,7 @@ function createWindow() {
     height: 860,
     minWidth: 900,
     minHeight: 600,
-    title: 'Estaleiro',
+    title: 'Beekeeper',
     backgroundColor: '#ffffff',
     show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },

@@ -1,4 +1,4 @@
-# Estaleiro
+# Beekeeper
 
 Plataforma para implementar requisitos e resolver defeitos em microserviços com agentes. Dás-lhe os documentos de
 entrada que descrevem o requisito ou o defeito; em cada passo, os agentes que ligaste a esse passo trabalham com eles,
@@ -42,8 +42,8 @@ No Windows, o Claude Code precisa do Git for Windows instalado (usa a Git Bash).
 
 ### Opção A: o executável para Windows
 
-1. Descarrega `Estaleiro-<versão>-windows-x64.zip` das [Releases](https://github.com/carnehd/cf-task-plataform/releases/latest).
-2. Extrai o zip para uma pasta tua (por exemplo `C:\Estaleiro`): dentro está `Estaleiro-<versão>.exe`. É portátil:
+1. Descarrega `Beekeeper-<versão>-windows-x64.zip` das [Releases](https://github.com/carnehd/cf-task-plataform/releases/latest).
+2. Extrai o zip para uma pasta tua (por exemplo `C:\Beekeeper`): dentro está `Beekeeper-<versão>.exe`. É portátil:
    não instala nada, e a pasta `data` (tarefas, agentes, definições) fica ao lado do exe.
 3. Abre o exe. Não está assinado: se o Windows mostrar "O Windows protegeu o seu PC", escolhe **Mais informações** e
    **Executar mesmo assim**.
@@ -66,12 +66,12 @@ Outra porta ou outra pasta de dados (uma segunda instância, ou testes):
 
 ```bash
 PORT=5811 npm run web                     # macOS, Linux
-ESTALEIRO_DATA=/caminho/dados npm run web
+BEEKEEPER_DATA=/caminho/dados npm run web
 ```
 
 ```powershell
 $env:PORT=5811; npm run web               # Windows (PowerShell)
-$env:ESTALEIRO_DATA="C:\dados"; npm run web
+$env:BEEKEEPER_DATA="C:\dados"; npm run web
 ```
 
 Para atualizar: `git pull` e voltar a correr `npm run web`. A pasta `data` não vai para o Git e fica como estava.
@@ -88,8 +88,7 @@ npm start
 1. **Definições:** a pasta raiz onde estão todos os microserviços (cada subpasta é um microserviço, de preferência um
    repositório Git). Os agentes correm a partir desta pasta.
 2. **Agentes:** em cada passo, **Adicionar a partir de pasta**. A plataforma lê os `agents/*.md` e `SKILL.md` que lá
-   estão e guarda onde ficam (não os copia). Ordena-os com ↑ ↓, marca as pausas, e escolhe em **Corre em** se cada um
-   corre no Claude Code ou no Copilot CLI.
+   estão e guarda onde ficam (não os copia). Ordena-os com ↑ ↓ e marca as pausas. O CLI que os corre (Claude Code ou Copilot CLI) escolhe-se no topo da página, em **Agentes em**.
 3. **Tarefas, Nova tarefa:** título, tipo e documentos. Depois, em cada separador de passo, **Começar**.
 
 As definições, os agentes e as tarefas guardam caminhos deste computador: noutro computador, define a pasta raiz e
@@ -158,7 +157,7 @@ se carrega da primeira vez que abres a sala.
 
 ## Claude Code e Copilot CLI
 
-Cada agente corre no CLI de onde veio: um agente de `.claude/` (ou de um pack com `claude/`) no Claude CLI, um de `.github/` (ou `copilot/`) no Copilot CLI. Os dois passam pelas mesmas regras de cada passo, os mesmos pedidos de autorização e a mesma conversa. O Copilot corre em modo ACP (`copilot --acp`); o modelo escolhe-se da lista que o próprio Copilot CLI dá.
+Todos os agentes correm no CLI escolhido em **Agentes em**, no topo à direita (Claude Code ou Copilot CLI); os ficheiros de um agente servem aos dois. Na primeira vez a plataforma escolhe o que está instalado; um CLI que não está no computador aparece "(não instalado)" e o passo não começa enquanto estiver escolhido. Mudar o CLI vale a partir do próximo agente que começar, e a lista de modelos de cada agente passa a ser a desse CLI. Os dois passam pelas mesmas regras de cada passo, os mesmos pedidos de autorização e a mesma conversa. O Copilot corre em modo ACP (`copilot --acp`); o modelo escolhe-se da lista que o próprio Copilot CLI dá.
 
 Diferenças do Copilot: aprova sozinho os comandos que considera seguros (um `ls` não chega a ser perguntado), não recebe o motivo de uma recusa (a plataforma junta-o à mensagem seguinte), e não se lhe impede a leitura de um documento tirado das Entradas (o pedido diz-lhe para não o usar).
 
@@ -214,7 +213,7 @@ data/            tarefas, agentes e definições deste computador (não vai para
 
 ```bash
 npm install
-npm run dist     # dist/Estaleiro-<versão>.exe: Windows x64, portátil (nas Releases vai dentro de um zip)
+npm run dist     # dist/Beekeeper-<versão>.exe: Windows x64, portátil (nas Releases vai dentro de um zip)
 ```
 
 Gera-se em qualquer sistema (também num Mac). O electron-builder descarrega o Electron para Windows da página de
