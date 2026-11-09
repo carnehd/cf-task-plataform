@@ -1,0 +1,22 @@
+# dependências e o que se gera (npm install, npm run dist)
+node_modules/
+dist/
+
+# a pasta de dados: tarefas, documentos, agentes, definições e o segredo do endereço deste computador
+data/
+
+# protótipos de desenho: têm nomes de microserviços e caminhos deste computador
+design/
+
+# configuração local (Claude Code, sistema, editores)
+.claude/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# registos e variáveis de ambiente
+*.log
+npm-debug.log*
+.env
+.env.*

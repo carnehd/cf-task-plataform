@@ -1,0 +1,34 @@
+{
+  "name": "cf-task-plataform",
+  "productName": "Estaleiro",
+  "version": "0.1.0",
+  "description": "Plataforma para implementar requisitos e resolver defeitos em microserviços com agentes: análise, implementação, ambiente local, testes Bruno e relatório",
+  "main": "src/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "web": "node src/web.js",
+    "dist": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^28.3.3",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.local.estaleiro",
+    "productName": "Estaleiro",
+    "files": [
+      "src/**/*",
+      "skills/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "portable",
+      "signAndEditExecutable": false,
+      "artifactName": "Estaleiro-${version}.exe"
+    }
+  }
+}
