@@ -11,11 +11,14 @@ const IS_WIN = process.platform === 'win32';
 // Por isso as ferramentas procuram-se com o ambiente da shell do utilizador, lido uma vez de uma shell de login.
 // No Windows os programas recebem o PATH completo, e usa-se o da própria app.
 let shellEnv = null;
+let shellEnvWait = null;
 
 function loginShellEnv() {
   if (IS_WIN) return Promise.resolve(process.env);
   if (shellEnv) return Promise.resolve(shellEnv);
-  return new Promise((resolve) => {
+  // vários pedidos ao mesmo tempo (os cinco programas, por exemplo) esperam pela mesma shell
+  if (shellEnvWait) return shellEnvWait;
+  shellEnvWait = new Promise((resolve) => {
     const mark = '__ESTALEIRO_ENV__';
     const env = { ...process.env };
     let out = '';
@@ -46,6 +49,7 @@ function loginShellEnv() {
     child.on('error', () => { clearTimeout(timer); finish(); });
     child.on('close', () => { clearTimeout(timer); finish(); });
   });
+  return shellEnvWait;
 }
 
 // As variáveis de uma sessão do Claude Code de onde a app possa ter sido aberta são dessa sessão, não do utilizador:

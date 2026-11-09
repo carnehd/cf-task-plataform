@@ -117,6 +117,21 @@
   </section>
 </div>
 
+<!-- Antes de começar um passo: confirmar os branches e os commits dos microserviços (com uma verificação a pedido) -->
+<div class="overlay" id="modal-start" role="dialog" aria-modal="true" aria-labelledby="ms-title">
+  <div class="modal start-modal">
+    <header><h2 id="ms-title">Começar o passo</h2></header>
+    <div class="start-text" id="ms-text"></div>
+    <div class="scan" id="ms-scan" hidden></div>
+    <footer>
+      <button class="btn" id="ms-scan-btn" type="button">Verificar microserviços</button>
+      <span class="hint start-scope" id="ms-scope"></span>
+      <button class="btn" data-close type="button">Cancelar</button>
+      <button class="btn primary" id="ms-go" type="button">Começar</button>
+    </footer>
+  </div>
+</div>
+
 <!-- Confirmar -->
 <div class="overlay" id="modal-confirm" role="alertdialog" aria-modal="true" aria-labelledby="mc-title">
   <div class="modal" style="width:min(460px,100%)">

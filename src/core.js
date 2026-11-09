@@ -23,8 +23,11 @@ function registerAll(ipcMain, ctx) {
       dataDir: ctx.dataDir,
       platform: process.platform,
       mode: ctx.mode || 'app',
-      clis: { claude: await shell.findCli('claude', fresh), copilot: await shell.findCli('copilot', fresh) },
-      engines: { docker: await shell.findCli('docker', fresh), podman: await shell.findCli('podman', fresh), git: await shell.findCli('git', fresh) },
+      // os cinco ao mesmo tempo: cada um é um programa a arrancar (no Windows, o copilot sozinho leva segundos)
+      ...(await (async () => {
+        const [claude, copilot, docker, podman, git] = await Promise.all(['claude', 'copilot', 'docker', 'podman', 'git'].map((n) => shell.findCli(n, fresh)));
+        return { clis: { claude, copilot }, engines: { docker, podman, git } };
+      })()),
     };
   });
   ipcMain.handle('app:open-path', async (_, p) => {

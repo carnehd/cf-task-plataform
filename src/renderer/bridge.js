@@ -150,6 +150,7 @@
       outputs: post('pipeline:outputs'),
       readOutput: post('pipeline:read-output'),
       changes: post('pipeline:changes'),
+      scanRepos: post('pipeline:scan-repos'),
       setBranch: post('pipeline:set-branch'),
       fileDiff: post('pipeline:file-diff'),
       inputs: post('pipeline:inputs'),

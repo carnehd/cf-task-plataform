@@ -28,6 +28,24 @@ const MODELS = ['', 'fable', 'opus', 'sonnet', 'haiku'];
 const PERMS = ['ask', 'read', 'all', 'plan'];
 const TEXT_MAX = 200 * 1024;
 const CONSOLE_SHOWN = 1500;
+// a consola de um agente pode ter muitos megabytes: para as últimas linhas, lê-se só o fim do ficheiro
+const CONSOLE_TAIL_BYTES = 4 * 1024 * 1024;
+function tailLines(file, max) {
+  const size = fs.statSync(file).size;
+  const from = Math.max(0, size - CONSOLE_TAIL_BYTES);
+  const fd = fs.openSync(file, 'r');
+  let text;
+  try {
+    const buf = Buffer.alloc(size - from);
+    fs.readSync(fd, buf, 0, buf.length, from);
+    text = buf.toString('utf8');
+  } finally {
+    fs.closeSync(fd);
+  }
+  // a começar a meio do ficheiro, a primeira linha está cortada
+  if (from > 0) text = text.slice(text.indexOf('\n') + 1);
+  return text.split('\n').filter(Boolean).slice(-max);
+}
 // cada agente corre no CLI de onde veio: o Claude Code ou o Copilot CLI
 const CLI = { claude: { name: 'claude', label: 'Claude CLI' }, copilot: { name: 'copilot', label: 'Copilot CLI' } };
 const cliOf = (agent) => CLI[agent && (agent.runner || agent.tool) === 'copilot' ? 'copilot' : 'claude'];
@@ -73,27 +91,45 @@ function readText(file) {
   }
 }
 
-// O estado de todos os repositórios Git da pasta raiz: o commit e as alterações por guardar. Com repoTests, as
-// alterações nas pastas de testes dos microserviços não contam (o passo pode escrever lá).
-async function snapshot(root, repoTests = null) {
-  const out = {};
-  let entries = [];
+// Corre fn em cada item, no máximo n de cada vez (o git em muitos repositórios grandes, sem os lançar todos juntos)
+async function mapLimit(items, n, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const k = next++;
+      out[k] = await fn(items[k], k);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker));
+  return out;
+}
+const GIT_AT_ONCE = 6;
+
+// Os repositórios Git da pasta raiz, pelo nome da pasta
+function reposIn(root) {
   try {
-    entries = fs.readdirSync(root, { withFileTypes: true });
+    return fs.readdirSync(root, { withFileTypes: true }).filter((e) => !e.name.startsWith('.') && e.isDirectory() && git.isRepo(path.join(root, e.name))).map((e) => e.name);
   } catch {
-    return out;
+    return [];
   }
-  for (const e of entries) {
-    const dir = path.join(root, e.name);
-    if (e.name.startsWith('.') || !e.isDirectory() || !git.isRepo(dir)) continue;
+}
+
+// O estado dos repositórios dados (nomes de pastas da raiz): o commit e as alterações por guardar. Com repoTests, as
+// alterações nas pastas de testes dos microserviços não contam (o passo pode escrever lá).
+async function snapshot(root, repoTests = null, names = []) {
+  const out = {};
+  await mapLimit(names, GIT_AT_ONCE, async (name) => {
+    const dir = path.join(root, name);
+    if (!git.isRepo(dir)) return;
     try {
       let dirty = (await git.dirty(dir)).sort();
       if (repoTests) dirty = dirty.filter((l) => !inRepoTests(dir, path.join(dir, l.slice(3).split(' -> ').pop().replace(/\/$/, ''), '_'), repoTests));
-      out[e.name] = { head: await git.head(dir), dirty };
+      out[name] = { head: await git.head(dir), dirty };
     } catch {
       // um repositório que não responde fica de fora
     }
-  }
+  });
   return out;
 }
 
@@ -468,7 +504,7 @@ function register(ipcMain, h) {
     p.endedAt = now();
     p.current = null;
     if (p.freeze) {
-      const after = await snapshot(settings.rootDir(dataDir), steps.get(step).repoTests || null);
+      const after = await snapshot(settings.rootDir(dataDir), steps.get(step).repoTests || null, p.freeze.repos || Object.keys(p.freeze.before || {}));
       const moved = p.freeze.moved || {};
       for (const [k, head] of Object.entries(moved)) if (after[k] && after[k].head === head && p.freeze.before[k]) after[k] = { ...after[k], head: p.freeze.before[k].head };
       const changed = Object.keys({ ...p.freeze.before, ...after }).filter((k) => JSON.stringify(p.freeze.before[k] || null) !== JSON.stringify(after[k] || null));
@@ -538,7 +574,11 @@ function register(ipcMain, h) {
       startedAt: now(),
       current: 0,
       links: seq.map((a) => ({ agentId: a.id, name: a.name, pause: a.pause, status: 'pending' })),
-      freeze: def.freeze ? { before: await snapshot(root, def.repoTests || null) } : null,
+      // código congelado: confere-se nos repositórios onde a tarefa mexeu e nos microserviços escolhidos (não em todos)
+      freeze: def.freeze ? await (async () => {
+        const repos = [...new Set([...Object.keys((t.git && t.git.repos) || {}), ...(t.chosenServices || [])])].filter((n) => git.isRepo(path.join(root, n)));
+        return { repos, before: await snapshot(root, def.repoTests || null, repos) };
+      })() : null,
     };
     if (def.branch && !fresh.branch) fresh.branch = branchFor(fresh);
     h.event(fresh, 'user', `Começou o passo ${def.name}: ${seq.map((a) => a.name).join(' → ')}`);
@@ -644,7 +684,7 @@ function register(ipcMain, h) {
     const { link } = linkOf(id, step, i);
     let lines = [];
     try {
-      lines = fs.readFileSync(path.join(linkDir(id, step, Number(i), link), 'console.jsonl'), 'utf8').split('\n').filter(Boolean).slice(-CONSOLE_SHOWN);
+      lines = tailLines(path.join(linkDir(id, step, Number(i), link), 'console.jsonl'), CONSOLE_SHOWN);
     } catch {
       // ainda sem consola
     }
@@ -702,31 +742,32 @@ function register(ipcMain, h) {
   ipcMain.handle('pipeline:changes', guard(async (id) => {
     const t = h.load(id);
     const root = settings.rootDir(dataDir);
-    const out = [];
-    for (const [name, rec] of Object.entries((t.git && t.git.repos) || {})) {
+    // os repositórios da tarefa, vários de cada vez
+    const out = await mapLimit(Object.entries((t.git && t.git.repos) || {}), GIT_AT_ONCE, async ([name, rec]) => {
       const dir = path.join(root, name);
-      if (!fs.existsSync(dir)) { out.push({ name, ...rec, missing: true }); continue; }
-      out.push({ name, ...rec, current: await git.branch(dir), ...(await git.changes(dir, rec.base)) });
-    }
-    // os repositórios da pasta raiz com alterações por guardar (fora dos que a tarefa já pôs no seu branch)
-    const dirty = [];
-    let entries = [];
-    try {
-      entries = fs.readdirSync(root, { withFileTypes: true });
-    } catch {
-      // sem pasta raiz
-    }
-    for (const e of entries) {
-      const dir = path.join(root, e.name);
-      if (e.name.startsWith('.') || !e.isDirectory() || !git.isRepo(dir) || (t.git && t.git.repos && t.git.repos[e.name])) continue;
+      if (!fs.existsSync(dir)) return { name, ...rec, missing: true };
+      const [current, changed] = await Promise.all([git.branch(dir), git.changes(dir, rec.base)]);
+      return { name, ...rec, current, ...changed };
+    });
+    return { branch: t.branch || branchFor(t), repos: out };
+  }));
+
+  // A verificação que a pessoa pede antes de começar um passo: o branch, o que está por guardar e o último commit de
+  // cada microserviço. Os escolhidos no passo Microserviços; sem escolha, todos os da pasta raiz.
+  ipcMain.handle('pipeline:scan-repos', guard(async (id) => {
+    const t = h.load(id);
+    const root = settings.rootDir(dataDir);
+    if (!root) throw new Error('Define primeiro a pasta raiz dos microserviços, em Definições');
+    const chosen = (t.chosenServices || []).filter((n) => git.isRepo(path.join(root, n)));
+    const names = chosen.length ? chosen : reposIn(root);
+    const repos = await mapLimit(names, GIT_AT_ONCE, async (name) => {
       try {
-        const lines = await git.dirty(dir);
-        if (lines.length) dirty.push({ name: e.name, count: lines.length, branch: await git.branch(dir) });
-      } catch {
-        // um repositório que não responde fica de fora
+        return { name, ...(await git.overview(path.join(root, name))) };
+      } catch (e) {
+        return { name, error: String((e && e.message) || e).slice(0, 300) };
       }
-    }
-    return { branch: t.branch || branchFor(t), repos: out, dirty };
+    });
+    return { scope: chosen.length ? 'chosen' : 'all', branch: t.branch || branchFor(t), repos };
   }));
 
   // "Já resolvi": confirma que o microserviço ficou como devia, fecha o alerta e diz ao agente para tentar de novo
@@ -787,7 +828,7 @@ function register(ipcMain, h) {
     t.agentSettings = t.agentSettings || {};
     t.agentSettings[String(agentId)] = next;
     agents.setDefaults(dataDir, String(agentId), next);
-    saveAndTell(t);
+    h.save(t); // sem avisar: a página que o mudou já o mostra
     return { settings: next };
   }));
 

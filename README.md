@@ -42,10 +42,10 @@ No Windows, o Claude Code precisa do Git for Windows instalado (usa a Git Bash).
 
 ### Opção A: o executável para Windows
 
-1. Descarrega `Estaleiro-<versão>.exe` das [Releases](https://github.com/carnehd/cf-task-plataform/releases/latest).
-2. Põe-no numa pasta tua (por exemplo `C:\Estaleiro`). É portátil: não instala nada, e a pasta `data` (tarefas,
-   agentes, definições) fica ao lado do exe.
-3. Abre-o. O exe não está assinado: se o Windows mostrar "O Windows protegeu o seu PC", escolhe **Mais informações** e
+1. Descarrega `Estaleiro-<versão>-windows-x64.zip` das [Releases](https://github.com/carnehd/cf-task-plataform/releases/latest).
+2. Extrai o zip para uma pasta tua (por exemplo `C:\Estaleiro`): dentro está `Estaleiro-<versão>.exe`. É portátil:
+   não instala nada, e a pasta `data` (tarefas, agentes, definições) fica ao lado do exe.
+3. Abre o exe. Não está assinado: se o Windows mostrar "O Windows protegeu o seu PC", escolhe **Mais informações** e
    **Executar mesmo assim**.
 
 Para atualizar, troca o exe por um novo na mesma pasta: a pasta `data` fica.
@@ -123,6 +123,12 @@ anterior termina. Cada agente:
 
 Um agente marcado com **pausa depois** faz a sequência parar até carregares em **Aprovar e continuar**.
 
+Antes de começar um passo, a plataforma pede-te para confirmares em que branch e em que commit está cada
+microserviço: os agentes trabalham sobre o código como está. **Verificar microserviços** mostra, para cada um, o
+branch, os ficheiros por guardar, os commits por enviar ou por receber (em relação ao último fetch, sem ir à rede) e o
+último commit. Verifica os microserviços escolhidos no passo Microserviços; sem escolha, todos os da pasta raiz. A
+plataforma só corre o `git status` quando o pedes: com muitos microserviços grandes, demora.
+
 Antes de começar, escolhes para cada agente o **modelo** (o padrão do Claude CLI, Fable, Opus, Sonnet ou Haiku) e as
 **permissões**: *perguntar sempre* (cada comando pede-te autorização), *leitura sem perguntar* (`git status`, `ls`,
 `cat`, `grep`… correm logo), *tudo sem perguntar* (menos o que a plataforma recusa sempre) ou *só planear* (não corre
@@ -171,8 +177,8 @@ Sempre recusados, sem perguntar: `git push`, mudar de branch, `reset`, `rebase` 
 primeira alteração de um agente nele. Se esse microserviço tiver alterações por guardar, a alteração é recusada: a
 plataforma não mexe no trabalho de ninguém. Nunca faz push.
 
-**Nos testes o código fica congelado**: a plataforma guarda o estado dos repositórios no início do passo e confirma no
-fim que nada mudou.
+**Nos testes o código fica congelado**: a plataforma guarda o estado dos repositórios onde a tarefa mexeu e dos
+microserviços escolhidos no início do passo, e confirma no fim que nada mudou.
 
 ## Estrutura
 
@@ -208,7 +214,7 @@ data/            tarefas, agentes e definições deste computador (não vai para
 
 ```bash
 npm install
-npm run dist     # dist/Estaleiro-<versão>.exe: Windows x64, portátil
+npm run dist     # dist/Estaleiro-<versão>.exe: Windows x64, portátil (nas Releases vai dentro de um zip)
 ```
 
 Gera-se em qualquer sistema (também num Mac). O electron-builder descarrega o Electron para Windows da página de

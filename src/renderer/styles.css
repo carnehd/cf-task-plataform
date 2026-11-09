@@ -844,3 +844,22 @@ tr:last-child td { border-bottom: 0; }
 @media (max-width: 900px) { .office-ball, .rail.open ~ .shell .office-ball, .office-pop, .rail.open ~ .shell .office-pop { left: 16px; } }
 @keyframes office-pulse { 0% { transform: scale(.92); opacity: .7; } 100% { transform: scale(1.35); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .office-ball::after { animation: none; } }
+
+/* antes de começar um passo: confirmar os microserviços, com a verificação a pedido */
+.start-modal { width: min(880px, 100%); }
+.start-text { display: grid; gap: 8px; color: var(--text-muted); }
+.start-text b { color: var(--text); }
+.start-modal footer { align-items: center; flex-wrap: wrap; }
+.start-modal footer .start-scope { margin-right: auto; }
+.scan { max-height: 46vh; overflow-y: auto; overflow-x: hidden; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.scan-wait { display: flex; align-items: center; gap: 8px; padding: 14px; color: var(--text-muted); }
+.scan-sum { padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--bg-surface); }
+.scan-table { table-layout: fixed; font-size: var(--fs-small); }
+.scan-table th { position: sticky; top: 0; background: var(--bg); text-align: left; font-weight: 600; color: var(--text-muted); padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.scan-table th:nth-child(1) { width: 26%; } .scan-table th:nth-child(2) { width: 22%; } .scan-table th:nth-child(3) { width: 12%; } .scan-table th:nth-child(4) { width: 11%; }
+.scan-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+.scan-table tr.warn td { background: color-mix(in srgb, var(--yellow) 7%, var(--bg)); }
+.scan-table tr.bad td { background: color-mix(in srgb, var(--red) 7%, var(--bg)); color: var(--red); }
+.scan-table code { font-size: var(--fs-caption); }
+@media (max-width: 700px) { .scan-table th:nth-child(5), .scan-table td:nth-child(5) { display: none; } .scan-table th:nth-child(1) { width: 34%; } .scan-table th:nth-child(2) { width: 30%; } }
+.scan-table td.br { white-space: normal; overflow-wrap: anywhere; }

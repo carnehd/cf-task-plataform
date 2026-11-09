@@ -100,4 +100,29 @@ async function fileDiff(cwd, base, file, full = false) {
   return { patch: r.out.length > PATCH_MAX ? r.out.slice(0, PATCH_MAX) : r.out, truncated: r.out.length > PATCH_MAX };
 }
 
-module.exports = { BRANCH, isRepo, head, branch, dirty, branchExists, createBranch, checkout, changes, fileDiff };
+// Um resumo para a pessoa conferir antes de começar um passo: o branch, quantos ficheiros estão por guardar, os commits
+// por enviar e por receber (em relação ao último fetch: não vai à rede) e o último commit. Duas chamadas ao git.
+async function overview(cwd) {
+  const [st, last] = await Promise.all([
+    run(cwd, ['status', '--porcelain=v2', '--branch']),
+    run(cwd, ['log', '-1', '--date=format:%Y-%m-%d %H:%M', '--format=%h%x09%cd%x09%s']),
+  ]);
+  if (!st.ok) throw new Error(st.err.trim().split('\n').pop() || 'o git status falhou');
+  const lines = st.out.split('\n').filter(Boolean);
+  const header = (k) => {
+    const l = lines.find((x) => x.startsWith(`# branch.${k} `));
+    return l ? l.slice(`# branch.${k} `.length).trim() : '';
+  };
+  const ab = /^\+(\d+) -(\d+)$/.exec(header('ab'));
+  const [hash = '', when = '', ...subject] = last.ok ? last.out.trim().split('\t') : [];
+  return {
+    branch: header('head') === '(detached)' ? `(${header('oid').slice(0, 7)})` : header('head'),
+    upstream: header('upstream'),
+    ahead: ab ? Number(ab[1]) : null,
+    behind: ab ? Number(ab[2]) : null,
+    dirty: lines.filter((l) => !l.startsWith('#')).length,
+    commit: hash ? { hash, when, subject: subject.join(' ').slice(0, 200) } : null,
+  };
+}
+
+module.exports = { BRANCH, isRepo, head, branch, dirty, branchExists, createBranch, checkout, changes, fileDiff, overview };

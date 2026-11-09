@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld('estaleiro', {
     outputs: invoke('pipeline:outputs'),
     readOutput: invoke('pipeline:read-output'),
     changes: invoke('pipeline:changes'),
+    scanRepos: invoke('pipeline:scan-repos'),
     setBranch: invoke('pipeline:set-branch'),
     fileDiff: invoke('pipeline:file-diff'),
     inputs: invoke('pipeline:inputs'),

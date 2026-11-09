@@ -63,10 +63,15 @@ function describe(name, folder) {
   return { id: name, name, folder, build, springBoot: /spring-boot/.test(pom + gradle), port: portOf(folder), branch: branchOf(folder) };
 }
 
-// Os microserviços da pasta raiz, por ordem de nome. Sem pasta raiz, nenhum.
-function list(dataDir) {
+// Os microserviços da pasta raiz, por ordem de nome. Sem pasta raiz, nenhum. Ler as pastas todas (pom.xml, resources,
+// .git/HEAD) leva tempo com muitos microserviços, por isso a lista fica em memória: um minuto, ou até se pedir de novo
+// (Atualizar), ou até mudar a pasta raiz.
+const KEEP_MS = 60 * 1000;
+let cache = null;
+function list(dataDir, fresh = false) {
   const root = settings.rootDir(dataDir);
   if (!root) return [];
+  if (!fresh && cache && cache.root === root && Date.now() - cache.at < KEEP_MS) return cache.list;
   const out = [];
   let entries = [];
   try {
@@ -90,15 +95,17 @@ function list(dataDir) {
     const s = describe(e.name, folder);
     if (s) out.push(s);
   }
-  return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  out.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  cache = { root, at: Date.now(), list: out };
+  return out;
 }
 
 const get = (dataDir, id) => list(dataDir).find((s) => s.id === id) || null;
 
 function register(ipcMain, { dataDir }) {
-  const answer = () => ({ root: settings.rootDir(dataDir), services: list(dataDir) });
-  ipcMain.handle('services:list', async () => answer());
-  ipcMain.handle('services:refresh', async () => answer());
+  const answer = (fresh) => ({ root: settings.rootDir(dataDir), services: list(dataDir, fresh) });
+  ipcMain.handle('services:list', async () => answer(false));
+  ipcMain.handle('services:refresh', async () => answer(true));
 }
 
 module.exports = { register, list, get };

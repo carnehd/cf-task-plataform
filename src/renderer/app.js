@@ -48,6 +48,7 @@
     inputs: null, // as entradas do passo mostrado
     diffOpen: null, // o ficheiro na janela das diferenças
     entries: [], // a consola do agente mostrado
+    loaded: null, // de onde são as entradas e a consola à vista: { task, step, sel }
     outputs: [],
     changes: null,
     newTask: { files: [], folders: [], type: 'requisito' },
@@ -316,7 +317,9 @@
     if (r) state.tasks = r.tasks;
     $('#count-tarefas').textContent = String(state.tasks.length);
   }
+  let taskAskedAt = 0; // quando se pediu a tarefa pela última vez (os eventos que chegaram antes já vêm nela)
   async function loadTask(id) {
+    taskAskedAt = Date.now();
     const r = await call(api.tasks.get(id));
     if (!r) return false;
     state.task = r.task;
@@ -370,7 +373,7 @@
     if (view === 'agentes') { await loadAgents(); renderAgents(); setView('agentes'); return; }
     if (view === 'servicos') { await loadServices(); renderServices(); setView('servicos'); return; }
     if (view === 'definicoes') { await Promise.all([loadInfo(), loadServices()]); renderSettings(); setView('definicoes'); return; }
-    await Promise.all([loadTasks(), loadServices()]);
+    await loadTasks();
     renderTasks();
     setView('tarefas');
   }
@@ -408,7 +411,7 @@
   // ===== Uma tarefa =====
   const stepClass = (s) => ({ done: 'done', running: 'running', waiting: 'waiting', paused: 'waiting', interrupted: 'waiting', stopped: 'waiting', failed: 'failed' }[s] || '');
 
-  async function renderTask() {
+  async function renderTask(opts = {}) {
     const t = state.task;
     if (!t) return;
     const tabs = [`<button class="tab ${t.documents.length ? 'done' : ''}${state.tab === 'documentos' ? ' active' : ''}" data-tab="documentos" type="button"><span class="num">1</span>Documentos <span class="pill">${t.documents.length}</span></button>`,
@@ -431,7 +434,7 @@
           <div class="panel active" id="panel"></div>
         </div>
       </div>`;
-    await renderPanel();
+    await renderPanel(opts);
     $('#crumb-busy').hidden = !t.running;
   }
 
@@ -446,15 +449,16 @@
   }
   const afterPaint = () => $$('input[data-indet]').forEach((x) => { x.indeterminate = true; });
 
-  async function renderPanel() {
+  // light: um evento durante uma execução (sem voltar a pedir as entradas nem a consola, que os eventos mantêm em dia)
+  async function renderPanel(opts = {}) {
     const t = state.task;
     const el = $('#panel');
     if (!t || !el) return;
     if (state.tab === 'documentos') { el.innerHTML = documentsPanel(t); return; }
-    if (state.tab === 'microservicos') { await loadServices(); el.innerHTML = servicesPanel(t); filterServices(); return; }
+    if (state.tab === 'microservicos') { if (!opts.light || !state.services.length) await loadServices(); el.innerHTML = servicesPanel(t); filterServices(); return; }
     const def = t.stepDefs.find((s) => s.id === state.tab);
     if (!def) { el.innerHTML = ''; return; }
-    await loadStepData(t, def);
+    await loadStepData(t, def, opts);
     el.innerHTML = stepPanel(t, def);
     afterPaint();
     const body = $('#console-body');
@@ -498,7 +502,7 @@
     const r = await call(api.tasks.setServices(taskId(), names));
     if (!r) return;
     state.task.chosenServices = r.chosenServices;
-    await renderTask();
+    await renderTask({ light: true }); // a lista de microserviços já cá está
   }
 
   // ---- Documentos (a lista limpa) ----
@@ -617,23 +621,45 @@
   };
   const allFiles = () => ((state.changes && state.changes.repos) || []).flatMap((r) => (r.files || []).map((f) => ({ repo: r.name, ...f })));
 
-  async function loadStepData(t, def) {
+  // Os dados do passo à vista. Pede-se só o que pode ter mudado:
+  // - as entradas e a consola, ao chegar ao passo ou a outro agente (com light, num evento, ficam: a consola mantém-se
+  //   em dia com os eventos, e as entradas só mudam quando as mudas);
+  // - as alterações (vários comandos git por repositório), só no separador Alterações;
+  // - o que cada agente produziu, sempre (é pouco, e muda com o trabalho).
+  async function loadStepData(t, def, { light = false } = {}) {
     const f = t.flow[def.id];
     if (!state.copilotModels && f.links.some((l) => l.tool === 'copilot')) {
       const m = await call(api.pipeline.models());
       state.copilotModels = (m && m.copilot) || [];
     }
-    state.entries = [];
-    state.outputsAll = [];
-    state.changes = null;
-    const [inputs, changes] = await Promise.all([call(api.pipeline.inputs(t.id, def.id)), def.branch ? call(api.pipeline.changes(t.id)) : null]);
-    state.inputs = inputs;
-    state.changes = changes;
-    if (f.preview || !f.links.length) return;
-    const i = selOf(t, def);
-    const [con, ...outs] = await Promise.all([call(api.pipeline.console(t.id, def.id, i)), ...f.links.map((l, n) => call(api.pipeline.outputs(t.id, def.id, n)))]);
-    state.entries = con ? con.entries : [];
-    state.outputsAll = f.links.map((l, n) => ({ name: l.name, index: n, files: outs[n] ? outs[n].files : [] }));
+    const i = f.preview || !f.links.length ? null : selOf(t, def);
+    const here = state.loaded && state.loaded.task === t.id && state.loaded.step === def.id;
+    if (!here) { state.changes = null; state.inputs = null; }
+    const jobs = [];
+    if (!light || !here || !state.inputs) jobs.push(call(api.pipeline.inputs(t.id, def.id)).then((r) => { state.inputs = r; }));
+    if (def.branch && modeOf(def) === 'alteracoes') jobs.push(loadChanges(t));
+    if (i === null) {
+      state.entries = [];
+      state.outputsAll = [];
+    } else {
+      if (!light || !here || state.loaded.sel !== i) jobs.push(call(api.pipeline.console(t.id, def.id, i)).then((r) => { state.entries = r ? r.entries : []; }));
+      jobs.push(Promise.all(f.links.map((l, n) => call(api.pipeline.outputs(t.id, def.id, n)))).then((outs) => {
+        state.outputsAll = f.links.map((l, n) => ({ name: l.name, index: n, files: outs[n] ? outs[n].files : [] }));
+      }));
+    }
+    await Promise.all(jobs);
+    state.loaded = { task: t.id, step: def.id, sel: i };
+  }
+  // As alterações dos microserviços da tarefa (git): só quando se mostram
+  async function loadChanges(t) {
+    const r = await call(api.pipeline.changes(t.id));
+    if (state.task && state.task.id === t.id) state.changes = r || { repos: [] };
+  }
+  // redesenha o passo e leva a conversa ao fim
+  function showStep() {
+    repaintStep();
+    const body = $('#console-body');
+    if (body) body.scrollTop = body.scrollHeight;
   }
 
   // um comando de terminal, partido nos && ; | e com cores: o programa, as opções, os textos entre aspas, os operadores
@@ -1010,9 +1036,11 @@
     </div>${!canStart && reasons.length && !running && f.status !== 'paused' ? `<p class="hint mt">Para começar: ${esc(reasons.join('; '))}.</p>` : ''}
     ${def.freeze && !f.freeze ? '<p class="hint mt">Neste passo o código fica congelado: o agente só escreve na sua pasta e nas coleções Bruno dos microserviços (no branch da tarefa), e no fim a plataforma confirma que o resto do código não mudou.</p>' : ''}`;
     const repos = (state.changes && state.changes.repos) || [];
+    // os microserviços onde a tarefa já criou o branch: da tarefa, sem perguntar ao git
+    const touched = Object.keys((t.git && t.git.repos) || {});
     const branchCard = def.branch ? `<div class="card"><div class="card-head"><h2>Branch da tarefa</h2></div><div class="card-body">
-        ${repos.length ? `<p><code>${esc(t.branch)}</code></p>` : `<div class="row" style="flex-wrap:nowrap"><input type="text" id="branch-in" value="${esc(t.branch)}" autocomplete="off" spellcheck="false"><button class="btn" data-act="save-branch" type="button" style="height:34px">Guardar</button></div>`}
-        <p class="hint mt">${repos.length ? `Criado em ${repos.length} microserviço${repos.length === 1 ? '' : 's'}. Sem push.` : 'Criado em cada microserviço antes da primeira alteração do agente; recusado se esse microserviço tiver alterações por guardar. Sem push.'}</p></div></div>` : '';
+        ${touched.length ? `<p><code>${esc(t.branch)}</code></p>` : `<div class="row" style="flex-wrap:nowrap"><input type="text" id="branch-in" value="${esc(t.branch)}" autocomplete="off" spellcheck="false"><button class="btn" data-act="save-branch" type="button" style="height:34px">Guardar</button></div>`}
+        <p class="hint mt">${touched.length ? `Criado em ${touched.length} microserviço${touched.length === 1 ? '' : 's'}. Sem push.` : 'Criado em cada microserviço antes da primeira alteração do agente; recusado se esse microserviço tiver alterações por guardar. Sem push.'}</p></div></div>` : '';
     const left = `<div class="step2-side">
       <div class="card"><div class="card-head"><h2>Sequência</h2></div><div class="seq">${seq || '<p class="muted" style="padding:12px">Sem agentes. Liga-os na página Agentes.</p>'}</div><div class="card-body">${controls}</div></div>
       ${branchCard}</div>`;
@@ -1022,10 +1050,9 @@
       <div class="banner bad alert-box"><div class="grow"><b>Recusado: ${esc(x.repo)}</b> · ${esc(hm(x.at))}${x.count > 1 ? ` · ${x.count} tentativas` : ''}<div>${esc(x.text)}</div>
         ${x.files && x.files.length ? `<div class="alert-files mono">${x.files.slice(0, 8).map(esc).join('<br>')}${(x.total || x.files.length) > 8 ? `<br>… e mais ${(x.total || x.files.length) - 8}` : ''}</div>` : ''}</div>
         <div class="row"><button class="btn small" data-act="alert-resolve" data-id="${esc(x.id)}" type="button">${x.kind === 'dirty' || x.kind === 'moved' ? 'Já guardei, tentar de novo' : 'Já resolvi'}</button><button class="btn small" data-act="alert-dismiss" data-id="${esc(x.id)}" type="button">Fechar</button></div></div>`).join('');
-    const dirty = def.branch && state.changes && state.changes.dirty && state.changes.dirty.length && !running ? `<div class="banner warn"><div class="grow"><b>Microserviços com alterações por guardar:</b> ${state.changes.dirty.map((x) => `${esc(x.name)} (${x.count}, em ${esc(x.branch)})`).join(', ')}. Se o agente precisar de alterar algum destes, a plataforma recusa e avisa-te.</div></div>` : '';
     const freeze = def.freeze && f.freeze && f.freeze.checkedAt ? (f.freeze.changed.length ? `<div class="banner bad"><div class="grow"><b>O código mudou durante os testes</b> em ${esc(f.freeze.changed.join(', '))}. Os resultados não valem como prova.</div></div>` : '<div class="freeze"><span class="dot good"></span><b>Código congelado:</b> confirmado no fim, nenhum microserviço mudou durante este passo.</div>') : '';
     const nDocs = state.outputsAll.reduce((s, o) => s + o.files.length, 0);
-    const nFiles = allFiles().length;
+    const nFiles = state.changes ? allFiles().length : null;
     const nIn = state.inputs ? (state.inputs.on === state.inputs.total ? state.inputs.total : `${state.inputs.on}/${state.inputs.total}`) : null;
     const tabs = [['entradas', 'Entradas', nIn], ['conversa', 'Conversa', null], ['produzido', 'Produzido', nDocs], ...(def.branch ? [['alteracoes', 'Alterações', nFiles]] : [])];
     const seg = `<div class="seg big">${tabs.map(([v, lab, c]) => `<button type="button" data-mode="${v}" class="${mode === v ? 'active' : ''}">${lab}${c != null ? ` <span class="pill">${c}</span>` : ''}</button>`).join('')}</div>`;
@@ -1063,6 +1090,8 @@
     } else if (mode === 'produzido') {
       const docs = state.outputsAll.map((o) => `<div class="prod-agent"><h3>${esc(o.name)}</h3>${o.files.length ? o.files.map((x) => `<div class="doc-out">${typeBadge({ kind: 'file', name: x.path }, true)}<span class="fname">${esc(x.path)}</span><span class="dim dsize">${esc(size(x.size))}</span><button class="ib" type="button" data-act="view-output" data-index="${o.index}" data-rel="${esc(x.path)}" data-tip="Ver" aria-label="Ver">${icon('eye')}</button></div>`).join('') : '<p class="muted">Ainda nada.</p>'}</div>`).join('');
       body = `<div class="prod">${state.outputsAll.length ? docs : '<p class="muted">Ainda nada: aqui aparecem os documentos que os agentes deste passo escrevem na sua pasta de resultados.</p>'}</div>`;
+    } else if (!state.changes) {
+      body = '<div class="scan-wait"><span class="spinner" aria-hidden="true"></span>A ler as alterações dos microserviços…</div>';
     } else {
       headExtra = repos.length ? `<button class="btn small" data-act="refresh-changes" type="button" style="margin-left:auto">Atualizar</button>` : '';
       body = repos.length ? `<p class="hint">Os ficheiros alterados em cada microserviço, desde o início da tarefa (com o que ainda não está em commit). Clica num ficheiro para ver as diferenças.</p>
@@ -1072,7 +1101,7 @@
         : '<div class="empty-state"><h2>Sem alterações</h2><p>Os microserviços desta tarefa ainda não foram alterados.</p></div>';
     }
 
-    return `<div class="step2">${left}<div class="step2-main">${alerts}${dirty}${freeze}
+    return `<div class="step2">${left}<div class="step2-main">${alerts}${freeze}
       <div class="card main2"><div class="card-head">${seg}${headExtra}</div><div class="card-body">${body}</div></div></div></div>`;
   }
 
@@ -1189,7 +1218,7 @@
           ${state.root && !state.services.length ? '<p class="hint mt">Não encontrei microserviços nesta pasta.</p>' : ''}</div></div>
         <div class="card"><div class="card-head"><h2>Agentes de linha de comandos</h2></div><div class="card-body"><dl class="kv">
           <dt>Claude CLI</dt><dd>${cli(i.clis.claude, 'instala com <code>npm install -g @anthropic-ai/claude-code</code> e abre-o uma vez para iniciar sessão')}</dd>
-          <dt>Copilot CLI</dt><dd>${cli(i.clis.copilot, 'ainda não corre nenhum passo nesta versão')}</dd></dl>
+          <dt>Copilot CLI</dt><dd>${cli(i.clis.copilot, 'instala com <code>npm install -g @github/copilot</code> e corre <code>copilot login</code> uma vez para iniciar sessão')}</dd></dl>
           <p class="hint mt">A plataforma não tem modelo próprio: os agentes correm nestas CLI, com a tua conta. O que um agente lê vai para o fornecedor dele.</p></div></div>
         <div class="card"><div class="card-head"><h2>Motores</h2></div><div class="card-body"><dl class="kv">
           <dt>Docker</dt><dd>${cli(i.engines.docker, 'para o passo Ambiente')}</dd><dt>Podman</dt><dd>${cli(i.engines.podman, 'alternativa ao Docker')}</dd><dt>Git</dt><dd>${cli(i.engines.git, 'para o branch da tarefa')}</dd></dl></div></div>
@@ -1245,11 +1274,11 @@
   const stepId = () => state.tab;
   const currentDef = () => (state.task ? state.task.stepDefs.find((s) => s.id === state.tab) : null);
   const linkIndex = () => (currentDef() ? selOf(state.task, currentDef()) : 0);
-  async function reloadTask() {
+  async function reloadTask(opts = {}) {
     if (!state.task) return;
     const keep = $('#msg-in') ? $('#msg-in').value : '';
     if (await loadTask(state.task.id)) {
-      await renderTask();
+      await renderTask(opts);
       setView('tarefa');
       if (keep && $('#msg-in')) $('#msg-in').value = keep;
     }
@@ -1327,6 +1356,86 @@
       office.loading = false;
     }
     syncOffice();
+  }
+
+  // ---- Antes de começar um passo: confirmar os branches e os commits dos microserviços. A verificação (git status) só
+  // corre quando a pessoa a pede: com muitos microserviços grandes, demora ----
+  function startDialog(def, f) {
+    const t = state.task;
+    const again = f.status !== 'idle';
+    const chosen = (t.chosenServices || []).length;
+    const modal = $('#modal-start');
+    $('#ms-title').textContent = `${again ? 'Correr de novo' : 'Começar'} o passo ${def.name}`;
+    $('#ms-text').innerHTML = [
+      '<p><b>Confirma em que branch e em que commit está cada microserviço.</b> Os agentes trabalham sobre o código como está agora.</p>',
+      def.branch ? `<p>Em cada microserviço que alterarem, a plataforma cria o branch <code>${esc(t.branch)}</code> a partir do commit em que ele estiver. Um microserviço com alterações por guardar não pode ser alterado: a plataforma recusa e avisa-te.</p>` : '',
+      def.freeze ? '<p>O código fica congelado durante este passo: no fim, a plataforma confirma que os microserviços da tarefa e os escolhidos não mudaram.</p>' : '',
+      again ? '<p>Os agentes voltam a correr do princípio. O que produziram da última vez fica guardado à parte.</p>' : '',
+    ].join('');
+    $('#ms-scope').textContent = chosen ? `os ${chosen} escolhidos` : 'todos os da pasta raiz: pode demorar';
+    const scan = $('#ms-scan');
+    scan.hidden = true;
+    scan.innerHTML = '';
+    $('#ms-scan-btn').disabled = false;
+    $('#ms-go').textContent = again ? 'Correr de novo' : 'Começar';
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (v) => {
+        if (settled) return;
+        settled = true;
+        watch.disconnect();
+        $('#ms-go').onclick = null;
+        $('#ms-scan-btn').onclick = null;
+        modal.classList.remove('open');
+        resolve(v);
+      };
+      // Cancelar, Esc ou um clique fora fecham a janela: é um não
+      const watch = new MutationObserver(() => { if (!modal.classList.contains('open')) finish(false); });
+      $('#ms-go').onclick = () => finish(true);
+      $('#ms-scan-btn').onclick = async () => {
+        $('#ms-scan-btn').disabled = true;
+        scan.hidden = false;
+        scan.innerHTML = `<div class="scan-wait"><span class="spinner" aria-hidden="true"></span>A verificar ${chosen ? `os ${chosen} microserviços escolhidos` : 'os microserviços da pasta raiz'}…</div>`;
+        const r = await call(api.pipeline.scanRepos(t.id));
+        $('#ms-scan-btn').disabled = false;
+        $('#ms-scan-btn').textContent = 'Verificar de novo';
+        if (!settled) scan.innerHTML = r ? scanHtml(r) : '<p class="hint">A verificação falhou.</p>';
+      };
+      $('#ms-scan-btn').textContent = 'Verificar microserviços';
+      modal.classList.add('open');
+      watch.observe(modal, { attributes: true, attributeFilter: ['class'] });
+      $('#ms-go').focus();
+    });
+  }
+  // o resultado da verificação: primeiro os que pedem atenção (erro, alterações por guardar, commits por enviar)
+  function scanHtml(r) {
+    const repos = r.repos || [];
+    if (!repos.length) return '<p class="hint">Não encontrei repositórios Git para verificar.</p>';
+    const weight = (x) => (x.error ? 0 : x.dirty ? 1 : x.ahead ? 2 : 3);
+    const list = repos.slice().sort((a, b) => weight(a) - weight(b) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+    const n = (k) => repos.filter(k).length;
+    const plural = (c, one, many) => `${c} ${c === 1 ? one : many}`;
+    const facts = [
+      n((x) => x.dirty) ? plural(n((x) => x.dirty), 'com alterações por guardar', 'com alterações por guardar') : '',
+      n((x) => x.ahead) ? plural(n((x) => x.ahead), 'com commits por enviar', 'com commits por enviar') : '',
+      n((x) => x.behind) ? plural(n((x) => x.behind), 'atrás do remoto', 'atrás do remoto') : '',
+      n((x) => x.branch === r.branch) ? plural(n((x) => x.branch === r.branch), `já no branch ${r.branch}`, `já no branch ${r.branch}`) : '',
+      n((x) => x.error) ? plural(n((x) => x.error), 'com erro', 'com erro') : '',
+    ].filter(Boolean);
+    const sync = (x) => {
+      if (!x.upstream) return '<span class="dim" title="Este branch não segue nenhum branch remoto">sem remoto</span>';
+      if (!x.ahead && !x.behind) return '<span class="dim">em dia</span>';
+      return [x.ahead ? `<span class="pill warn" title="Commits por enviar para ${esc(x.upstream)}">↑${x.ahead}</span>` : '', x.behind ? `<span class="pill" title="Commits no remoto que ainda não tens (desde o último fetch)">↓${x.behind}</span>` : ''].join(' ');
+    };
+    const rows = list.map((x) => (x.error
+      ? `<tr class="bad"><td title="${esc(x.name)}">${esc(x.name)}</td><td colspan="4" title="${esc(x.error)}">${esc(x.error)}</td></tr>`
+      : `<tr class="${x.dirty ? 'warn' : ''}"><td title="${esc(x.name)}">${esc(x.name)}</td>
+        <td class="br" title="${esc(x.branch)}"><code>${esc(x.branch)}</code>${x.branch === r.branch ? ' <span class="pill accent">da tarefa</span>' : ''}</td>
+        <td>${x.dirty ? `<span class="pill warn" title="Ficheiros alterados ou novos, por guardar num commit">${x.dirty}</span>` : '<span class="dim">nada</span>'}</td>
+        <td>${sync(x)}</td>
+        <td title="${x.commit ? esc(`${x.commit.hash} ${x.commit.subject} (${x.commit.when})`) : ''}">${x.commit ? `<code>${esc(x.commit.hash)}</code> ${esc(x.commit.subject)} <span class="dim">${esc(x.commit.when)}</span>` : '<span class="dim">sem commits</span>'}</td></tr>`)).join('');
+    return `<p class="scan-sum"><b>${plural(repos.length, 'microserviço verificado', 'microserviços verificados')}</b>${r.scope === 'chosen' ? ' (os escolhidos)' : ''}${facts.length ? `: ${esc(facts.join(', '))}.` : ': tudo guardado e em dia.'}</p>
+      <table class="scan-table"><thead><tr><th>Microserviço</th><th>Branch</th><th>Por guardar</th><th title="Em relação ao último fetch: a plataforma não vai à rede">Remoto</th><th>Último commit</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
 
   const actions = {
@@ -1407,14 +1516,15 @@
     'start-step': async () => {
       const def = currentDef();
       const f = state.task.flow[def.id];
-      if (f.status !== 'idle' && !(await confirmBox('Correr o passo de novo', `Os agentes de ${def.name} voltam a correr do princípio. O que produziram da última vez fica guardado à parte.`, 'Correr de novo'))) return;
+      if (!(await startDialog(def, f))) return;
       state.sel[def.id] = 0;
       if (await call(api.pipeline.start(taskId(), def.id))) await reloadTask();
     },
-    'stop-step': async () => { if (await call(api.pipeline.stop(taskId()))) await reloadTask(); },
-    'continue-step': async () => { if (await call(api.pipeline.continue(taskId(), stepId()))) await reloadTask(); },
-    'done-link': async () => { if (await call(api.pipeline.done(taskId(), stepId(), linkIndex()))) await reloadTask(); },
-    'resume-link': async () => { if (await call(api.pipeline.resume(taskId(), stepId(), linkIndex()))) await reloadTask(); },
+    // estas não mudam a consola (o que o agente faz chega pelos eventos) nem as entradas: recarga leve
+    'stop-step': async () => { if (await call(api.pipeline.stop(taskId()))) await reloadTask({ light: true }); },
+    'continue-step': async () => { if (await call(api.pipeline.continue(taskId(), stepId()))) await reloadTask({ light: true }); },
+    'done-link': async () => { if (await call(api.pipeline.done(taskId(), stepId(), linkIndex()))) await reloadTask({ light: true }); },
+    'resume-link': async () => { if (await call(api.pipeline.resume(taskId(), stepId(), linkIndex()))) await reloadTask({ light: true }); },
     'retry-link': async () => {
       if (!(await confirmBox('Repetir o agente', 'Este agente corre de novo, sem a conversa anterior, e os seguintes voltam a esperar a vez.', 'Repetir'))) return;
       if (await call(api.pipeline.retry(taskId(), stepId(), linkIndex()))) await reloadTask();
@@ -1431,13 +1541,13 @@
         for (const [k, v] of Object.entries(state.doubtDrafts || {})) if (!k.startsWith(`${key}|`)) kept[k] = v;
         state.doubtDrafts = kept;
         toast('Respostas enviadas');
-        await reloadTask();
+        await reloadTask({ light: true });
       }
     },
     'send-msg': async () => {
       const text = $('#msg-in').value.trim();
       if (!text) return;
-      if (await call(api.pipeline.send(taskId(), text, stepId(), linkIndex()))) { $('#msg-in').value = ''; await reloadTask(); }
+      if (await call(api.pipeline.send(taskId(), text, stepId(), linkIndex()))) { $('#msg-in').value = ''; await reloadTask({ light: true }); }
     },
     perm: async (el) => { await call(api.pipeline.answer(taskId(), el.dataset.req, el.dataset.choice, {})); },
     'answer-question': async (el) => {
@@ -1454,7 +1564,13 @@
       const r = await call(api.pipeline.readOutput(taskId(), stepId(), el.dataset.index !== undefined ? Number(el.dataset.index) : linkIndex(), el.dataset.rel));
       if (r) viewText(r.name, r.binary ? `${size(r.size)} · ficheiro binário` : `${size(r.size)}${r.truncated ? ' · mostra-se só o início' : ''}`, r.binary ? 'Este ficheiro não é texto.' : r.text);
     },
-    'refresh-changes': async () => { await renderPanel(); },
+    'refresh-changes': async () => {
+      const t = state.task;
+      state.changes = null;
+      repaintStep();
+      await loadChanges(t);
+      if (state.task === t) repaintStep();
+    },
     'svc-all': async () => {
       const names = new Set(state.task.chosenServices || []);
       $$('.svc-row:not([hidden]) input[data-svc]').forEach((x) => names.add(x.dataset.svc));
@@ -1479,10 +1595,10 @@
     },
     'alert-resolve': async (el) => {
       const r = await call(api.pipeline.alertResolve(taskId(), el.dataset.id));
-      if (r) { toast(r.told ? 'Resolvido. O agente vai tentar de novo.' : 'Resolvido.'); await reloadTask(); }
+      if (r) { toast(r.told ? 'Resolvido. O agente vai tentar de novo.' : 'Resolvido.'); await reloadTask({ light: true }); }
     },
-    'alert-dismiss': async (el) => { if (await call(api.pipeline.alertDismiss(taskId(), el.dataset.id))) await reloadTask(); },
-    'save-branch': async () => { if (await call(api.pipeline.setBranch(taskId(), $('#branch-in').value))) { toast('Branch guardado'); await reloadTask(); } },
+    'alert-dismiss': async (el) => { if (await call(api.pipeline.alertDismiss(taskId(), el.dataset.id))) await reloadTask({ light: true }); },
+    'save-branch': async () => { if (await call(api.pipeline.setBranch(taskId(), $('#branch-in').value))) { toast('Branch guardado'); await reloadTask({ light: true }); } },
     // -- agentes --
     'add-agent': (el) => openAgentModal(el.dataset.step),
     'view-agent-file': async (el) => {
@@ -1533,15 +1649,32 @@
     }
     const sel = e.target.closest('[data-sel]');
     if (sel && state.task) {
-      state.sel[state.tab] = Number(sel.dataset.sel);
+      // outro agente da sequência: só a consola dele (o resto do passo já cá está)
+      const t = state.task;
+      const def = currentDef();
+      const n = Number(sel.dataset.sel);
+      state.sel[state.tab] = n;
       state.mode[state.tab] = 'conversa';
-      await renderPanel();
+      const r = await call(api.pipeline.console(t.id, def.id, n));
+      if (state.task !== t || state.tab !== def.id || state.sel[def.id] !== n) return;
+      state.entries = r ? r.entries : [];
+      state.loaded = { task: t.id, step: def.id, sel: n };
+      showStep();
       return;
     }
     const mode = e.target.closest('[data-mode]');
     if (mode && state.task) {
+      // Entradas, Conversa, Produzido: já cá estão. Alterações: o git só agora, e só o desta tarefa
       state.mode[state.tab] = mode.dataset.mode;
-      await renderPanel();
+      const def = currentDef();
+      showStep();
+      if (def && def.branch && mode.dataset.mode === 'alteracoes') {
+        const t = state.task;
+        state.changes = null;
+        repaintStep();
+        await loadChanges(t);
+        if (state.task === t && state.tab === def.id && modeOf(def) === 'alteracoes') repaintStep();
+      }
       return;
     }
     const file = e.target.closest('[data-file]');
@@ -1609,6 +1742,8 @@
     if (setting && state.task) {
       const r = await call(api.pipeline.setAgentSettings(taskId(), setting.dataset.agent, { [setting.dataset.setting]: setting.value }));
       if (r) {
+        // o servidor não avisa (foi esta página que mudou): os agentes desta tarefa ficam já com a escolha nova
+        for (const fl of Object.values(state.task.flow || {})) for (const l of fl.links || []) if (l.agentId === setting.dataset.agent) l.settings = { ...r.settings };
         const help = $(`[data-help="${CSS.escape(setting.dataset.agent)}"]`);
         if (help) help.textContent = permHelp(r.settings.perm);
         toast(setting.dataset.setting === 'model' ? `Modelo: ${r.settings.model || 'o padrão do CLI'}` : `Permissões: ${permName(r.settings.perm)}`);
@@ -1798,14 +1933,25 @@
 
   // -- o que o processo principal conta enquanto os agentes trabalham --
   let reloadTimer = null;
+  let eventAt = 0;
   const reloadSoon = () => {
+    eventAt = Date.now();
     clearTimeout(reloadTimer);
     reloadTimer = setTimeout(() => {
+      reloadTimer = null;
+      // a página já pediu a tarefa depois deste evento (a ação que o causou recarregou): nada a fazer
+      if (taskAskedAt >= eventAt) return;
       // não se redesenha enquanto alguém escreve a resposta a uma pergunta do agente
       const a = document.activeElement;
       if (a && a.classList && (a.classList.contains('q-other') || a.classList.contains('doubt-a'))) return;
-      reloadTask();
+      reloadTask({ light: true });
     }, 250);
+  };
+  // na lista de tarefas, o mesmo: espera que os eventos acalmem e pede a lista uma vez
+  let listTimer = null;
+  const reloadListSoon = () => {
+    clearTimeout(listTimer);
+    listTimer = setTimeout(async () => { listTimer = null; if (state.view === 'tarefas') { await loadTasks(); renderTasks(); } }, 400);
   };
   api.onTaskEvent(async (e) => {
     const t = state.task;
@@ -1832,7 +1978,7 @@
     if (e.type === 'alert') {
       toast(`Recusado: ${e.alert.text}`, true);
       if (state.view === 'tarefa' && t && t.id === e.taskId) reloadSoon();
-      else if (state.view === 'tarefas') { await loadTasks(); renderTasks(); }
+      else if (state.view === 'tarefas') reloadListSoon();
       return;
     }
     if (e.type === 'pending') {
@@ -1860,7 +2006,7 @@
       return;
     }
     if (state.view === 'tarefa' && t && t.id === e.taskId) reloadSoon();
-    else if (state.view === 'tarefas') { await loadTasks(); renderTasks(); }
+    else if (state.view === 'tarefas') reloadListSoon();
   });
 
   addEventListener('hashchange', route);
@@ -1879,7 +2025,8 @@
     if (!typing && !$$('.overlay.open').length) (box.querySelector('input[type=radio], input[type=checkbox]') || box.querySelector('button.primary') || box.querySelector('button')).focus({ preventScroll: true });
   }
   (async () => {
-    await Promise.all([loadInfo(), loadAgents(), loadServices(), loadTasks()]);
+    loadInfo(); // os --version dos programas: em fundo, a barra lateral mostra-os quando chegarem
+    await Promise.all([loadAgents(), loadServices()]);
     await route();
   })();
 })();

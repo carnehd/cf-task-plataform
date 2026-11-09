@@ -155,6 +155,50 @@ function register(ipcMain, ctx) {
 
   const flow = pipeline.register(ipcMain, { dataDir, send, load, save, event, changed, dirOf });
 
+  // Os documentos da tarefa que uma consola leu. As consolas só crescem: lê-se cada uma uma vez e, de cada vez que se
+  // volta a perguntar, só o que lhe foi acrescentado (uma consola nova no mesmo sítio, de um passo corrido de novo,
+  // lê-se do princípio).
+  const readsCache = new Map();
+  function readsOf(file) {
+    let st;
+    try {
+      st = fs.statSync(file);
+    } catch {
+      return [];
+    }
+    const c = readsCache.get(file);
+    if (c && c.ino === st.ino && c.size === st.size) return c.reads;
+    const from = c && c.ino === st.ino && st.size > c.size ? c.size : 0;
+    const reads = new Set(from ? c.reads : []);
+    let text = '';
+    try {
+      const fd = fs.openSync(file, 'r');
+      try {
+        const buf = Buffer.alloc(st.size - from);
+        fs.readSync(fd, buf, 0, buf.length, from);
+        text = buf.toString('utf8');
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch {
+      return c ? c.reads : [];
+    }
+    // só as linhas inteiras: a última pode estar a meio de ser escrita
+    const end = text.lastIndexOf('\n') + 1;
+    for (const line of text.slice(0, end).split('\n')) {
+      if (!line.includes('"Read"') || !line.includes('tarefa/documents/')) continue;
+      try {
+        const e = JSON.parse(line);
+        if (e.k === 'tool' && e.a === 'Read' && String(e.b).startsWith('tarefa/documents/')) reads.add(String(e.b).slice('tarefa/documents/'.length));
+      } catch {
+        // uma linha estragada não conta
+      }
+    }
+    const done = { ino: st.ino, size: from + Buffer.byteLength(text.slice(0, end)), reads: [...reads] };
+    readsCache.set(file, done);
+    return done.reads;
+  }
+
   // Que agentes leram cada documento: tirado das consolas dos agentes (cada Read de tarefa/documents/...), sem
   // abrir os documentos. { 'requisitos/RQ-002.md': ['implementador-ms', ...] }
   function usageOf(t) {
@@ -170,23 +214,9 @@ function register(ipcMain, ctx) {
       for (const d of dirs) {
         const link = (p.links || [])[Number(d.split('-')[0]) - 1];
         if (!link) continue;
-        let text = '';
-        try {
-          text = fs.readFileSync(path.join(stepsDir, step, d, 'console.jsonl'), 'utf8');
-        } catch {
-          continue;
-        }
-        for (const line of text.split('\n')) {
-          if (!line.includes('"Read"') || !line.includes('tarefa/documents/')) continue;
-          try {
-            const e = JSON.parse(line);
-            if (e.k !== 'tool' || e.a !== 'Read' || !String(e.b).startsWith('tarefa/documents/')) continue;
-            const rel = String(e.b).slice('tarefa/documents/'.length);
-            out[rel] = out[rel] || [];
-            if (!out[rel].includes(link.name)) out[rel].push(link.name);
-          } catch {
-            // uma linha estragada não conta
-          }
+        for (const rel of readsOf(path.join(stepsDir, step, d, 'console.jsonl'))) {
+          out[rel] = out[rel] || [];
+          if (!out[rel].includes(link.name)) out[rel].push(link.name);
         }
       }
     }
@@ -202,16 +232,17 @@ function register(ipcMain, ctx) {
     return file;
   }
 
-  const view = (t) => {
+  // light: para a lista de tarefas, sem o que só a página de uma tarefa mostra (o uso dos documentos, os ficheiros das pastas)
+  const view = (t, light = false) => {
     const f = flow.viewOf(t);
     return {
       ...t,
-      documents: t.documents.map((d) => (d.kind === 'folder' && !d.files ? { ...d, files: listCopied(path.join(dirOf(t.id), 'documents', d.rel)) } : d)),
+      documents: light ? t.documents : t.documents.map((d) => (d.kind === 'folder' && !d.files ? { ...d, files: listCopied(path.join(dirOf(t.id), 'documents', d.rel)) } : d)),
       flow: f,
       stepDefs: steps.STEPS.map((s) => ({ id: s.id, name: s.name, summary: s.summary, branch: Boolean(s.branch), freeze: Boolean(s.freeze), runnable: s.runnable })),
       branch: t.branch || flow.branchFor(t),
       docsDir: path.join(dirOf(t.id), 'documents'),
-      docUsage: usageOf(t),
+      docUsage: light ? {} : usageOf(t),
       status: statusOf(t, f),
       running: pipeline.isRunning(t.id),
     };
@@ -318,7 +349,7 @@ function register(ipcMain, ctx) {
       if (!t) continue;
       t.documents = t.documents || [];
       t.events = t.events || [];
-      const v = view(t);
+      const v = view(t, true);
       out.push({ id: v.id, ref: v.ref, title: v.title, type: v.type, documents: v.documents.length, updatedAt: v.updatedAt, status: v.status, steps: Object.fromEntries(Object.entries(v.flow).map(([k, p]) => [k, p.status])), docsOk: v.documents.length > 0 });
     }
     out.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
@@ -421,8 +452,7 @@ function register(ipcMain, ctx) {
     const given = [...new Set((Array.isArray(names) ? names : []).map(String))].filter((n) => known.has(n) || before.includes(n)).slice(0, 200);
     t.chosenServices = given.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     event(t, 'user', t.chosenServices.length ? `Microserviços escolhidos: ${t.chosenServices.join(', ')}` : 'Sem microserviços escolhidos: os agentes decidem');
-    save(t);
-    changed(id);
+    save(t); // sem avisar: a página que o mudou já o mostra
     return { chosenServices: t.chosenServices };
   }));
 
