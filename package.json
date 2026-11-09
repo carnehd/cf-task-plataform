@@ -8,7 +8,7 @@
   "scripts": {
     "start": "electron .",
     "web": "node src/web.js",
-    "dist": "electron-builder --win portable"
+    "dist": "electron-builder --win portable --x64"
   },
   "devDependencies": {
     "electron": "^28.3.3",

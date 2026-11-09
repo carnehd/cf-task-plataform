@@ -8,8 +8,100 @@ A plataforma é agnóstica: não lê o código dos microserviços nem interpreta
 agente os documentos e o que os anteriores produziram, impõe as regras do passo, e mostra o que acontece. O que
 depende do código (que linguagem, como se compila, como se testa) fica nos agentes.
 
-A plataforma não tem modelo próprio: os agentes correm no Claude CLI que já tens, com a tua conta. O que um agente lê
-vai para o fornecedor dele.
+A plataforma não tem modelo próprio: os agentes correm no Claude Code ou no Copilot CLI que já tens, com a tua conta.
+O que um agente lê vai para o fornecedor dele.
+
+## Instalação
+
+### Dependências
+
+| O quê | Quando é preciso | Como confirmar |
+|---|---|---|
+| [Node.js](https://nodejs.org) 20 ou mais recente | para correr a partir do código (não é preciso com o `.exe`) | `node --version` |
+| [Git](https://git-scm.com) | sempre: a plataforma cria o branch da tarefa e mostra as alterações | `git --version` |
+| [Claude Code](https://docs.anthropic.com/claude-code), com sessão iniciada | para os agentes que correm no Claude Code | `claude --version` |
+| [Copilot CLI](https://github.com/github/copilot-cli), com sessão iniciada | para os agentes que correm no Copilot CLI | `copilot --version` |
+| [Docker Desktop](https://www.docker.com/products/docker-desktop/) | para os agentes do passo Ambiente que levantam contentores | `docker ps` |
+| [Bruno CLI](https://docs.usebruno.com/bru-cli/overview) | para os agentes do passo Testes que correm coleções Bruno | `bru --version` |
+| O que os microserviços precisam (Java, Maven, …) | para os agentes compilarem e correrem os testes | `java -version`, `mvn -v` |
+
+Basta um dos dois CLIs (Claude Code ou Copilot CLI), o dos agentes que vais usar. Docker, Bruno e as ferramentas dos
+microserviços dependem do que os teus agentes fazem: a plataforma não os usa diretamente.
+
+Instalar e iniciar sessão nos CLIs (Windows, macOS ou Linux, com o Node instalado):
+
+```bash
+npm install -g @anthropic-ai/claude-code   # Claude Code
+claude                                     # e dentro dele: /login
+npm install -g @github/copilot             # Copilot CLI
+copilot                                    # e dentro dele: /login
+npm install -g @usebruno/cli               # Bruno CLI
+```
+
+No Windows, o Claude Code precisa do Git for Windows instalado (usa a Git Bash).
+
+### Opção A: o executável para Windows
+
+1. Descarrega `Estaleiro-<versão>.exe` das [Releases](https://github.com/carnehd/cf-task-plataform/releases/latest).
+2. Põe-no numa pasta tua (por exemplo `C:\Estaleiro`). É portátil: não instala nada, e a pasta `data` (tarefas,
+   agentes, definições) fica ao lado do exe.
+3. Abre-o. O exe não está assinado: se o Windows mostrar "O Windows protegeu o seu PC", escolhe **Mais informações** e
+   **Executar mesmo assim**.
+
+Para atualizar, troca o exe por um novo na mesma pasta: a pasta `data` fica.
+
+### Opção B: a partir do código, no browser
+
+```bash
+git clone https://github.com/carnehd/cf-task-plataform.git
+cd cf-task-plataform
+npm run web
+```
+
+Abre no browser o endereço que aparece na consola (`http://127.0.0.1:5810/?t=...`). Não precisa de `npm install`: só
+usa o Node. É um servidor local, só em `127.0.0.1`, e o endereço leva um segredo (`data/web-token`) que fica igual de
+uma vez para a outra.
+
+Outra porta ou outra pasta de dados (uma segunda instância, ou testes):
+
+```bash
+PORT=5811 npm run web                     # macOS, Linux
+ESTALEIRO_DATA=/caminho/dados npm run web
+```
+
+```powershell
+$env:PORT=5811; npm run web               # Windows (PowerShell)
+$env:ESTALEIRO_DATA="C:\dados"; npm run web
+```
+
+Para atualizar: `git pull` e voltar a correr `npm run web`. A pasta `data` não vai para o Git e fica como estava.
+
+### Opção C: a partir do código, como aplicação
+
+```bash
+npm install      # descarrega o Electron
+npm start
+```
+
+### Configurar pela primeira vez
+
+1. **Definições:** a pasta raiz onde estão todos os microserviços (cada subpasta é um microserviço, de preferência um
+   repositório Git). Os agentes correm a partir desta pasta.
+2. **Agentes:** em cada passo, **Adicionar a partir de pasta**. A plataforma lê os `agents/*.md` e `SKILL.md` que lá
+   estão e guarda onde ficam (não os copia). Ordena-os com ↑ ↓, marca as pausas, e escolhe em **Corre em** se cada um
+   corre no Claude Code ou no Copilot CLI.
+3. **Tarefas, Nova tarefa:** título, tipo e documentos. Depois, em cada separador de passo, **Começar**.
+
+As definições, os agentes e as tarefas guardam caminhos deste computador: noutro computador, define a pasta raiz e
+adiciona os agentes de novo.
+
+### Problemas comuns
+
+- **"Não encontro o Claude CLI" (ou o Copilot CLI):** confirma num terminal novo que `claude --version` responde. No
+  macOS, a app procura os programas com o PATH da tua shell de login; no Windows, com o PATH do sistema (depois de
+  instalar um CLI, fecha e volta a abrir a plataforma).
+- **"A porta 5810 já está em uso":** já há uma plataforma a correr (abre o endereço dela), ou usa outra porta (`PORT`).
+- **O agente falha a autenticação:** abre o CLI num terminal e inicia sessão de novo (`/login`).
 
 ## O fluxo
 
@@ -82,28 +174,6 @@ plataforma não mexe no trabalho de ninguém. Nunca faz push.
 **Nos testes o código fica congelado**: a plataforma guarda o estado dos repositórios no início do passo e confirma no
 fim que nada mudou.
 
-## Correr
-
-```bash
-npm run web      # no browser: abre o endereço que aparece na consola (não precisa de npm install)
-npm install      # só para a janela Electron e para o .exe
-npm start        # como aplicação (Electron)
-```
-
-`npm run web` só precisa do Node: é um servidor local, só em `127.0.0.1`. O endereço leva um segredo
-(`data/web-token`), igual de uma vez para a outra. Outra porta: `PORT=5811 npm run web`. Outra pasta de dados (uma
-segunda instância, ou testes): `ESTALEIRO_DATA=/caminho npm run web`.
-
-Pré-requisitos: Node 20 ou mais recente; o Claude CLI instalado e com sessão iniciada (`claude`, depois `/login`).
-
-## Primeiros passos
-
-1. **Definições:** a pasta raiz onde estão todos os microserviços. Cada subpasta é um microserviço; os agentes correm
-   a partir desta pasta.
-2. **Agentes:** em cada passo, **Adicionar a partir de pasta**. A plataforma lê os `agents/*.md` e `SKILL.md` que lá
-   estão e guarda onde ficam (não os copia). Ordena-os com ↑ ↓ e marca as pausas.
-3. **Tarefas, Nova tarefa:** título, tipo e documentos. Depois, em cada separador de passo, **Começar**.
-
 ## Estrutura
 
 ```
@@ -134,8 +204,12 @@ data/            tarefas, agentes e definições deste computador (não vai para
 - Jira como origem dos documentos.
 - Correr passos em paralelo.
 
-## Executável para Windows
+## Gerar o executável
 
 ```bash
-npm run dist     # dist/Estaleiro-<versão>.exe, portátil: a pasta data fica ao lado do exe
+npm install
+npm run dist     # dist/Estaleiro-<versão>.exe: Windows x64, portátil
 ```
+
+Gera-se em qualquer sistema (também num Mac). O electron-builder descarrega o Electron para Windows da página de
+releases do Electron no GitHub, e guarda-o em cache.
