@@ -6,6 +6,10 @@
 // (fez uma pergunta, ou espera uma decisão), a sequência espera pela pessoa, que lhe responde ou o dá por terminado.
 // Depois de um agente marcado com pausa, a sequência espera que a pessoa a deixe continuar.
 //
+// Num passo que altera os microserviços, o agente só altera os que a pessoa aprovou: escreve MICROSERVICOS.md na sua
+// pasta de resultados com os que quer alterar e porquê, a página mostra a lista, e a pessoa aceita ou recusa. Uma escrita
+// num microserviço que não está aprovado é recusada (task.pipeline[passo].repoPlan).
+//
 // Em data/tasks/<id>/steps/<passo>/<n>-<agente>/: outputs/ (o que o agente produziu) e console.jsonl (o que fez).
 // O estado fica em task.pipeline[passo]; os branches criados, em task.git.
 const fs = require('fs');
@@ -23,6 +27,7 @@ const { newId } = require('./store');
 
 const TOOLS = ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash', 'TodoWrite', 'AskUserQuestion'];
 const DONE_FILE = 'FEITO.md';
+const PLAN_FILE = 'MICROSERVICOS.md'; // a lista dos microserviços que o agente quer alterar, para a pessoa aprovar
 // os modelos que a pessoa pode escolher ('' é o que o Claude CLI usa por omissão) e os modos de permissão
 const MODELS = ['', 'fable', 'opus', 'sonnet', 'haiku'];
 const PERMS = ['ask', 'read', 'all', 'plan'];
@@ -138,6 +143,57 @@ async function snapshot(root, repoTests = null, names = []) {
   return out;
 }
 
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// MICROSERVICOS.md: os microserviços que o agente quer alterar, um por linha: "- nome: motivo", "1. nome — motivo", uma
+// tabela "| nome | motivo |" ou um título "## nome". known: as pastas da raiz. Um nome que parece de microserviço mas não
+// é uma pasta da raiz vem com known: false (a pessoa vê-o; não se aprova). Sem nenhuma linha assim, os nomes de pastas
+// citados no texto.
+function parsePlan(text, known) {
+  const names = [...known].sort((a, b) => b.length - a.length); // o mais comprido primeiro: sr-x-y antes de sr-x
+  const mention = (line) => names.find((n) => new RegExp(`(^|[^\\w-])${escRe(n)}([^\\w-]|$)`).test(line)) || '';
+  const looksLikeName = (s) => known.has(s) || (/^[a-z0-9][a-z0-9._-]*$/i.test(s) && s.includes('-'));
+  const clean = (s) => String(s || '').replace(/[`*]/g, '').trim();
+  const tokenOf = (s) => {
+    const w = (s.split(/\s+/)[0] || '').replace(/[:,.;]+$/, '');
+    return w.includes('/') ? w.split('/').filter(Boolean).pop() || '' : w;
+  };
+  const out = new Map();
+  const add = (name, why) => {
+    if (name && !out.has(name) && out.size < 100) out.set(name, { name, why: String(why || '').slice(0, 300), known: known.has(name) });
+  };
+  const rule = (l) => /^\s*\|?[\s:|-]+\|?\s*$/.test(l || '') && String(l).includes('-');
+  const lines = String(text || '').split(/\r?\n/);
+  lines.forEach((raw, k) => {
+    const line = raw.trim();
+    if (line.startsWith('|')) {
+      if (rule(line) || rule(lines[k + 1])) return; // a linha de separação, e o cabeçalho (a linha antes dela)
+      const cells = line.replace(/^\||\|$/g, '').split('|').map(clean);
+      const first = tokenOf(cells[0] || '');
+      const name = looksLikeName(first) ? first : mention(line);
+      if (name) add(name, cells.slice(1).filter(Boolean).join(' · '));
+      return;
+    }
+    const head = line.match(/^#{1,6}\s+(.+)$/);
+    if (head) {
+      const n = tokenOf(clean(head[1]));
+      if (known.has(n)) add(n, '');
+      return;
+    }
+    const item = line.match(/^(?:[-*+]|\d+[.)])\s+(.*)$/);
+    if (!item) return;
+    const body = clean(item[1]);
+    const word = body.split(/\s+/)[0] || '';
+    const first = tokenOf(body);
+    if (looksLikeName(first)) add(first, body.slice(word.length).replace(/^\s*[:—–-]\s*/, '').trim());
+    else {
+      const n = mention(body);
+      if (n) add(n, body);
+    }
+  });
+  if (!out.size) for (const n of names) if (new RegExp(`(^|[^\\w-])${escRe(n)}([^\\w-]|$)`).test(String(text || ''))) add(n, '');
+  return [...out.values()];
+}
+
 function register(ipcMain, h) {
   const { dataDir } = h;
   chosenCli = () => settings.cli(dataDir) || 'claude';
@@ -249,6 +305,60 @@ function register(ipcMain, h) {
     return '';
   }
 
+  // -- a lista dos microserviços a alterar, aprovada pela pessoa antes da primeira alteração --
+  // task.pipeline[passo].repoPlan = { status: 'proposed' | 'approved' | 'rejected', proposed: [{ name, why, known }],
+  //   approved: [nomes], index: o agente que a propôs, seen: o mtime do MICROSERVICOS.md lido, at, decidedAt, comment }
+  const rootFolders = () => {
+    try {
+      return new Set(fs.readdirSync(settings.rootDir(dataDir), { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name));
+    } catch {
+      return new Set();
+    }
+  };
+  // Lê o MICROSERVICOS.md do agente i, se mudou desde a última leitura, e altera t (quem chama guarda).
+  // 'new': há microserviços à espera da pessoa · 'known': já estavam todos aprovados · '': nada de novo
+  function readPlan(t, id, step, i) {
+    const p = t.pipeline && t.pipeline[step];
+    if (!p || !p.links[i]) return '';
+    const file = path.join(outputsOf(id, step, i, p.links[i]), PLAN_FILE);
+    let st;
+    let text;
+    try {
+      st = fs.statSync(file);
+      if (p.repoPlan && p.repoPlan.index === i && p.repoPlan.seen >= st.mtimeMs) return '';
+      text = fs.readFileSync(file, 'utf8').slice(0, 64 * 1024);
+    } catch {
+      return '';
+    }
+    const plan = p.repoPlan = p.repoPlan || { approved: [] };
+    const approved = new Set(plan.approved || []);
+    const list = parsePlan(text, rootFolders());
+    const fresh = list.filter((x) => !approved.has(x.name));
+    Object.assign(plan, { index: i, seen: st.mtimeMs });
+    if (list.length && !fresh.length) return 'known';
+    Object.assign(plan, { status: 'proposed', proposed: fresh, at: now(), decidedAt: null, comment: '' });
+    h.event(t, p.links[i].name, fresh.length ? `Quer alterar ${fresh.map((x) => x.name).join(', ')}: à espera da tua aprovação` : `Escreveu ${PLAN_FILE}, mas sem nenhum microserviço que a plataforma reconheça`);
+    return 'new';
+  }
+  const planNow = (id, step, i) => {
+    const t = h.load(id);
+    if (readPlan(t, id, step, i) === 'new') saveAndTell(t);
+  };
+  // Antes da primeira escrita num microserviço: tem de estar na lista aprovada. '' ou o que o agente deve fazer.
+  function repoGate(id, step, i, outputs, name) {
+    planNow(id, step, i); // escreveu a lista e foi logo tentar alterar: a pessoa vê-a já
+    const p = h.load(id).pipeline[step];
+    const plan = (p && p.repoPlan) || {};
+    const approved = plan.approved || [];
+    if (approved.includes(name)) return '';
+    const file = path.join(outputs, PLAN_FILE);
+    const wait = 'Termina a tua vez e espera: a plataforma diz-te quando a pessoa decidir.';
+    if (plan.status === 'proposed') return (plan.proposed || []).some((x) => x.name === name) ? `A lista de microserviços está à espera da aprovação da pessoa. ${wait}` : `${name} não está na lista à espera de aprovação: acrescenta-o a ${file}, com o motivo. ${wait}`;
+    if (plan.status === 'rejected') return `A pessoa recusou a lista de microserviços${plan.comment ? ` («${plan.comment}»)` : ''}. Revê ${file} e espera por nova aprovação.`;
+    if (approved.length) return `${name} não está na lista aprovada (aprovados: ${approved.join(', ')}). Se precisas dele, acrescenta-o a ${file}, diz porquê, termina a tua vez e espera por nova aprovação.`;
+    return `${name} ainda não foi aprovado pela pessoa. Antes de alterares um microserviço, escreve ${file} com os microserviços que vais alterar e porquê (uma linha por microserviço: "- <nome>: <motivo>"), termina a tua vez e espera que a pessoa aceite. Não escrevas ${DONE_FILE}.`;
+  }
+
   // -- as entradas de um passo: os documentos que os agentes recebem --
   // Por omissão, todos: os documentos da tarefa e o que os passos anteriores produziram. A pessoa pode tirar e voltar a
   // pôr cada ficheiro (fica em task.inputs[passo].off) e juntar documentos só a este passo (em inputs/<passo>/ da
@@ -323,12 +433,25 @@ function register(ipcMain, h) {
       );
     }
     lines.push('', '## O que podes fazer', '- Ler qualquer ficheiro destas pastas.', `- Escrever o que produzes em ${ctx.outputs}.`);
-    if (def.write.includes('projects')) lines.push(`- Alterar os microserviços que a tarefa precisar. Antes da tua primeira escrita num microserviço, a plataforma passa-o para o branch ${ctx.branch}; se ele tiver alterações por guardar, a escrita é recusada e deves dizê-lo à pessoa. Podes fazer git add e commit nesse branch; push, mudar de branch ou mexer na configuração do Git é recusado.`);
+    const asking = def.write.includes('projects') && ctx.perm !== 'plan';
+    if (def.write.includes('projects')) lines.push(`- Alterar os microserviços que a tarefa precisar${asking ? ' e que a pessoa aprovar (ver «Antes de alterar os microserviços»)' : ''}. Antes da tua primeira escrita num microserviço, a plataforma passa-o para o branch ${ctx.branch}; se ele tiver alterações por guardar, a escrita é recusada e deves dizê-lo à pessoa. Podes fazer git add e commit nesse branch; push, mudar de branch ou mexer na configuração do Git é recusado.`);
     if (def.write.includes('tests')) lines.push(`- Escrever os testes em ${ctx.tests}.`);
     if (def.freeze) lines.push('- Não podes alterar os microserviços: neste passo o código está congelado, e a plataforma confirma no fim que nada mudou.');
     if (def.freeze && def.repoTests) lines.push(`- Exceção: podes escrever testes nas pastas de testes dos microserviços: a pasta onde está o ${def.repoTests.marker} (uma coleção que já existe) ou, se o microserviço não tiver nenhuma, ${'<microserviço>'}/${def.repoTests.dir}/ para a criar. Antes da tua primeira escrita num microserviço, a plataforma passa-o para o branch ${ctx.branch || 'da tarefa'}. Não fazes commit nem mudas de branch.`);
     lines.push(
       ({ ask: '- Cada comando de terminal é autorizado por uma pessoa, um a um: diz porque o precisas.', read: '- Os comandos que só leem correm logo; os outros são autorizados por uma pessoa, um a um: diz porque os precisas.', all: '- Os comandos correm sem pedir autorização, menos os que a plataforma recusa sempre.', plan: '- Estás em modo só planear: não corres comandos nem alteras os microserviços; escreve o teu plano na tua pasta de resultados.' })[ctx.perm] || '',
+    );
+    if (asking) {
+      lines.push(
+        '',
+        '## Antes de alterar os microserviços',
+        `1. Analisa primeiro: ler não precisa de aprovação. Antes da primeira alteração a um microserviço, escreve ${path.join(ctx.outputs, PLAN_FILE)} com os microserviços que vais alterar e porquê, uma linha por microserviço: "- <nome da pasta>: <o que vais mudar e porquê>".`,
+        `2. Depois termina a tua vez e espera, sem escrever ${DONE_FILE}: a pessoa vê a lista na plataforma e aceita ou recusa, e a plataforma diz-te o que ela decidiu.`,
+        `3. Só alteras os microserviços aprovados: uma escrita noutro é recusada. Se depois precisares de mais algum, acrescenta-o a ${PLAN_FILE}, com o motivo, e espera de novo.`,
+      );
+      if (ctx.approved.length) lines.push(`Já aprovados neste passo (não precisas de os pedir de novo): ${ctx.approved.join(', ')}.`);
+    }
+    lines.push(
       '',
       '## Como terminar',
       `1. Só escreves ${path.join(ctx.outputs, DONE_FILE)} quando o trabalho deste passo estiver feito e não precisares de mais nada da pessoa: o que fizeste e onde, o que ficou por fazer, e o que o agente seguinte precisa de saber. É assim que a plataforma sabe que terminaste e passa ao seguinte.`,
@@ -395,6 +518,7 @@ function register(ipcMain, h) {
       previous: previousOf(id, t, def, step, i),
       inputs: inputsOf(id, t, step),
       perm: settingsFor(t, link.agentId).perm,
+      approved: (p.repoPlan && p.repoPlan.approved) || [],
     };
     const first = resume ? (message || 'Continua o teu trabalho de onde paraste.') : promptFor(t, def, i, p.links, agent, ctx);
     const decide = makePolicy({
@@ -402,6 +526,15 @@ function register(ipcMain, h) {
       writeDirs: [outputs, ...(def.write.includes('tests') ? [ctx.tests] : [])],
       repos: def.write.includes('projects'),
       prepareRepo: (dir, name) => prepareRepo(id, dir, name),
+      // só os microserviços que a pessoa aprovou (a lista em MICROSERVICOS.md)
+      approveRepo: def.write.includes('projects') ? (name) => repoGate(id, step, i, outputs, name) : null,
+      holdCommands: def.write.includes('projects') ? () => {
+        const q = h.load(id).pipeline[step];
+        return !(q && q.repoPlan && (q.repoPlan.approved || []).length);
+      } : null,
+      onWrite: def.write.includes('projects') ? (abs) => {
+        if (path.basename(abs) === PLAN_FILE) setTimeout(() => planNow(id, step, i), 800); // a escrita acontece a seguir
+      } : null,
       codeFrozen: Boolean(def.freeze),
       repoTests: def.repoTests || null,
       perm: settingsFor(t, link.agentId).perm,
@@ -454,6 +587,14 @@ function register(ipcMain, h) {
       log(id, step, i, link, { k: 'ok', a: 'Terminou', b: `${DONE_FILE} escrito` });
       saveAndTell(t);
       a.session.end(); // a sequência continua quando o processo fechar (ended)
+      return;
+    }
+    // parou à espera: se escreveu a lista dos microserviços, a pessoa vê-a; se já estavam todos aprovados, continua
+    if (steps.get(step).write.includes('projects') && readPlan(t, id, step, i) === 'known') {
+      const message = `Os microserviços de ${PLAN_FILE} já estão aprovados: podes continuar.`;
+      a.session.send(message);
+      log(id, step, i, link, { k: 'user', a: message });
+      saveAndTell(t);
       return;
     }
     link.status = 'waiting';
@@ -779,6 +920,48 @@ function register(ipcMain, h) {
     return { scope: chosen.length ? 'chosen' : 'all', branch: t.branch || branchFor(t), repos };
   }));
 
+  // A pessoa aceita ou recusa a lista de microserviços que o agente propôs; a decisão vai para o agente
+  ipcMain.handle('pipeline:repo-plan', guard(async (id, step, decision, comment) => {
+    const t = h.load(id);
+    const p = t.pipeline && t.pipeline[step];
+    const plan = p && p.repoPlan;
+    if (!plan || plan.status !== 'proposed') throw new Error('Não há nenhuma lista de microserviços à espera de aprovação');
+    const note = String(comment || '').trim().slice(0, 1000);
+    let message;
+    if (decision === 'approve') {
+      const ok = (plan.proposed || []).filter((x) => x.known).map((x) => x.name);
+      if (!ok.length) throw new Error('Nenhum destes microserviços existe na pasta raiz: recusa e diz ao agente o que corrigir');
+      plan.approved = [...new Set([...(plan.approved || []), ...ok])];
+      Object.assign(plan, { status: 'approved', decidedAt: now(), comment: note });
+      h.event(t, 'user', `Aprovou alterar: ${ok.join(', ')}`);
+      message = `A pessoa aprovou a lista: podes alterar ${plan.approved.join(', ')}.${note ? ` Nota da pessoa: ${note}` : ''} Continua.`;
+    } else {
+      if (!note) throw new Error('Diz ao agente porque recusas');
+      Object.assign(plan, { status: 'rejected', decidedAt: now(), comment: note });
+      h.event(t, 'user', `Recusou a lista de microserviços: ${note}`);
+      message = `A pessoa recusou a lista de microserviços de ${PLAN_FILE}: ${note}. Revê a lista (escreve o ficheiro de novo), termina a tua vez e espera por nova aprovação.${(plan.approved || []).length ? ` Continuam aprovados: ${plan.approved.join(', ')}.` : ''}`;
+    }
+    h.save(t);
+    const a = active.get(id);
+    if (a && a.step === step) {
+      const fresh = h.load(id);
+      const link = fresh.pipeline[step].links[a.index];
+      a.session.send(message);
+      link.status = 'running';
+      log(id, step, a.index, link, { k: 'user', a: message });
+      saveAndTell(fresh);
+      return { ok: true, told: true };
+    }
+    // sem sessão aberta (a plataforma reiniciou, ou o agente parou): retoma a conversa com a decisão
+    const link = p.links[plan.index];
+    if (!active.has(id) && link && link.sessionId) {
+      await runLink(id, step, plan.index, { resume: true, message });
+      return { ok: true, told: true };
+    }
+    h.changed(id);
+    return { ok: true, told: false };
+  }));
+
   // "Já resolvi": confirma que o microserviço ficou como devia, fecha o alerta e diz ao agente para tentar de novo
   ipcMain.handle('pipeline:alert-resolve', guard(async (id, alertId) => {
     const t = h.load(id);
@@ -861,4 +1044,4 @@ const stopAll = () => {
 // a correr: com um agente ativo, ou entre um agente que acabou e o seguinte (ou o fecho do passo)
 const isRunning = (id) => active.has(id) || moving.has(id);
 
-module.exports = { register, stopAll, isRunning };
+module.exports = { register, stopAll, isRunning, parsePlan };

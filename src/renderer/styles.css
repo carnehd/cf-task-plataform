@@ -106,9 +106,9 @@ code, .mono { font-family: var(--font-mono); font-size: var(--fs-small); }
 .card .card-head { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 12px; border-bottom: 1px solid var(--border); }
 .card .card-head h2 { font-size: var(--fs-small); color: var(--text-muted); font-weight: 600; }
 .card .card-body { padding: 12px; }
-input[type="text"], select, textarea { font: inherit; font-size: var(--fs-body); color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 0 12px; height: 34px; width: 100%; }
+input[type="text"], input[type="number"], input[type="search"], select, textarea { font: inherit; font-size: var(--fs-body); color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 0 12px; height: 34px; width: 100%; }
 textarea { height: auto; padding: 8px 12px; }
-input[type="text"]:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+input[type="text"]:focus, input[type="number"]:focus, input[type="search"]:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 label.field { display: grid; gap: 6px; font-size: var(--fs-small); color: var(--text-muted); font-weight: 600; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
@@ -429,6 +429,49 @@ tr:last-child td { border-bottom: 0; }
 .alert-box { align-items: flex-start; }
 .alert-box .grow { display: grid; gap: 4px; }
 .alert-files { font-size: var(--fs-caption); opacity: .9; }
+/* Mocks page */
+.mocks { display: grid; grid-template-columns: 240px 1fr; gap: 14px; align-items: start; }
+.mocks-side { display: grid; gap: 6px; }
+.mocks-main { display: grid; gap: 14px; min-width: 0; }
+.mock-item { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 2px 8px; text-align: left; padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); cursor: pointer; color: var(--text); }
+.mock-item:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.mock-item.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--bg)); }
+.mock-item .mi-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mock-item .mi-port { font-size: var(--fs-caption); color: var(--text-muted); }
+.mock-item .mi-sub { grid-column: 2 / 4; font-size: var(--fs-caption); color: var(--text-muted); }
+.mock-filter { height: 28px !important; width: 180px !important; font-size: var(--fs-small) !important; }
+.mock-table td { vertical-align: middle; padding: 6px 10px; }
+.mock-table .acts { white-space: nowrap; text-align: right; }
+.mock-row { cursor: pointer; }
+.mock-row:hover td { background: var(--bg-surface); }
+.mock-row.other td { color: var(--text-muted); }
+.mock-rel { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
+.mtag { display: inline-block; min-width: 52px; text-align: center; font-family: var(--font-mono); font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 5px; background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-muted); }
+.mtag.m-get { color: var(--green); border-color: color-mix(in srgb, var(--green) 30%, var(--bg)); }
+.mtag.m-post { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, var(--bg)); }
+.mtag.m-put, .mtag.m-patch { color: var(--yellow); border-color: color-mix(in srgb, var(--yellow) 35%, var(--bg)); }
+.mtag.m-delete { color: var(--red); border-color: color-mix(in srgb, var(--red) 30%, var(--bg)); }
+.mtag.m-any { color: var(--mauve); }
+.mock-log { display: grid; gap: 2px; max-height: 520px; overflow: auto; font-size: var(--fs-small); }
+.ml-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 5px 4px; border-bottom: 1px solid var(--border); }
+.ml-path { flex: 1; min-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ml-ms { font-size: var(--fs-caption); }
+.ml-body { flex-basis: 100%; font-size: var(--fs-caption); color: var(--text-muted); padding-left: 62px; overflow-wrap: anywhere; }
+.ml-note { font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--text-dim); padding: 3px 4px; }
+.ml-note.err { color: var(--red); }
+.mk-row { gap: 10px; flex-wrap: nowrap; align-items: end; }
+.mk-row .grow { flex: 1; }
+.mk-port { width: 120px; }
+.mn-method { width: 130px; }
+.mf-route { font-size: var(--fs-small); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mf-text { width: 100%; min-height: 420px; font-family: var(--font-mono); font-size: 13px; line-height: 1.5; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-surface); color: var(--text); resize: vertical; tab-size: 2; }
+@media (max-width: 900px) { .mocks { grid-template-columns: 1fr; } }
+
+/* the list of microservices the agent wants to change, for the person to accept */
+.plan-box { align-items: flex-start; }
+.plan-box .grow { display: grid; gap: 6px; }
+.plan-list { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
+.plan-box input[type=text] { width: 100%; max-width: 560px; }
 
 /* dragging documents onto a task */
 .drop-overlay { position: fixed; inset: 0; z-index: 40; background: color-mix(in srgb, var(--accent) 10%, rgba(255, 255, 255, .85)); display: grid; place-items: center; pointer-events: none; }

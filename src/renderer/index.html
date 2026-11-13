@@ -18,6 +18,7 @@
     <a class="rail-btn" href="#tarefas" data-view="tarefas" title="Tarefas"><svg viewBox="0 0 24 24"><path d="M3.5 5.5l1.5 1.5l2.5-2.5"/><path d="M3.5 11.5l1.5 1.5l2.5-2.5"/><path d="M3.5 17.5l1.5 1.5l2.5-2.5"/><path d="M11 6h9"/><path d="M11 12h9"/><path d="M11 18h9"/></svg><span class="rail-label">Tarefas</span><span class="count" id="count-tarefas"></span></a>
     <a class="rail-btn" href="#agentes" data-view="agentes" title="Agentes"><svg viewBox="0 0 24 24"><path d="M6 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2z"/><path d="M12 2v2"/><path d="M9 12v9"/><path d="M15 12v9"/><path d="M5 16l4-2"/><path d="M15 14l4 2"/><path d="M9 18h6"/><path d="M10 8v.01"/><path d="M14 8v.01"/></svg><span class="rail-label">Agentes</span><span class="count" id="count-agentes"></span></a>
     <a class="rail-btn" href="#servicos" data-view="servicos" title="Serviços"><svg viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M4 16a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M14 16a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2z"/><path d="M14 7h6"/><path d="M17 4v6"/></svg><span class="rail-label">Serviços</span><span class="count" id="count-servicos"></span></a>
+    <a class="rail-btn" href="#mocks" data-view="mocks" title="Mocks"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg><span class="rail-label">Mocks</span><span class="count" id="count-mocks"></span></a>
     <div class="rail-spacer"></div>
     <a class="rail-btn" href="#definicoes" data-view="definicoes" title="Definições"><svg viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37c1 .608 2.296.07 2.572-1.065z"/><path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0-6 0"/></svg><span class="rail-label">Definições</span></a>
     <div class="rail-foot" id="rail-foot"></div>
@@ -39,6 +40,7 @@
       <section class="view" id="view-tarefa"></section>
       <section class="view" id="view-agentes"></section>
       <section class="view" id="view-servicos"></section>
+      <section class="view" id="view-mocks"></section>
       <section class="view" id="view-definicoes"></section>
     </div>
     <!-- aparece enquanto um agente trabalha: mostra (e esconde) a sala do passo, por cima da bola -->
@@ -113,6 +115,50 @@
       <label class="field mt">Passo onde entra<select id="ma-step"><option value="">Nenhum, só disponível</option><option value="implementacao">Implementação</option><option value="ambiente">Ambiente</option><option value="testes">Testes</option></select></label>
     </div>
     <footer><button class="btn" data-close type="button">Cancelar</button><button class="btn primary" id="ma-add" type="button" disabled>Adicionar</button></footer>
+  </div>
+</div>
+
+<!-- Um mock server: criar ou mudar -->
+<div class="overlay" id="modal-mock" role="dialog" aria-modal="true" aria-labelledby="mk-title">
+  <div class="modal">
+    <header><h2 id="mk-title">Novo mock</h2><button class="btn small" data-close type="button">Fechar</button></header>
+    <p class="muted">Um servidor local que responde aos microserviços com as respostas guardadas numa pasta, um ficheiro por pedido. Corre com o Java deste computador (11 ou mais recente).</p>
+    <div class="row mk-row">
+      <label class="field grow">Nome<input type="text" id="mk-name" placeholder="iam" autocomplete="off" spellcheck="false"></label>
+      <label class="field mk-port">Porta<input type="number" id="mk-port" min="1024" max="65535" placeholder="8089"></label>
+    </div>
+    <label class="field">Pasta das respostas<span class="row" style="flex-wrap:nowrap"><input type="text" id="mk-dir" placeholder="vazio: na pasta de dados da plataforma, em mocks/&lt;nome&gt;" autocomplete="off" spellcheck="false"><button class="btn" type="button" data-act="mock-pick-folder" style="height:34px">Escolher…</button></span></label>
+    <label class="field">Gravar de (opcional)<input type="text" id="mk-record" placeholder="https://servico-verdadeiro.exemplo" autocomplete="off" spellcheck="false"><span class="hint" style="font-weight:400">Com um endereço, o mock reencaminha cada pedido para esse serviço e guarda a resposta na pasta, com o nome certo. Sem endereço, responde só com o que lá está.</span></label>
+    <footer><button class="btn" data-close type="button">Cancelar</button><button class="btn primary" data-act="mock-save" type="button">Guardar</button></footer>
+  </div>
+</div>
+
+<!-- Uma resposta de um mock: ver e editar -->
+<div class="overlay" id="modal-mock-file" role="dialog" aria-modal="true" aria-labelledby="mf-title">
+  <div class="modal" style="width:min(980px,100%)">
+    <header><h2 id="mf-title">Resposta</h2><span class="hint" id="mf-meta"></span><button class="btn small" data-close type="button">Fechar</button></header>
+    <div class="mf-route" id="mf-route"></div>
+    <textarea id="mf-text" class="mf-text" spellcheck="false"></textarea>
+    <p class="hint">Na resposta: <code>{{id}}</code> (o valor de um <code>{id}</code> do caminho), <code>{{query.x}}</code>, <code>{{corpo.campo}}</code> (um campo do JSON recebido), <code>{{agora}}</code>, <code>{{agora+5m}}</code> (daqui a 5 minutos; também <code>+300</code> segundos, <code>+2h</code>, <code>+1d</code>), <code>{{uuid}}</code>. Também nos ficheiros <code>.headers</code>. Guardar vale logo, sem reiniciar o mock.</p>
+    <footer><button class="btn bad" data-act="mock-file-delete" type="button" style="margin-right:auto">Apagar</button><button class="btn" data-close type="button">Cancelar</button><button class="btn primary" data-act="mock-file-save" type="button">Guardar</button></footer>
+  </div>
+</div>
+
+<!-- Uma resposta nova -->
+<div class="overlay" id="modal-mock-new" role="dialog" aria-modal="true" aria-labelledby="mn-title">
+  <div class="modal">
+    <header><h2 id="mn-title">Nova resposta</h2><button class="btn small" data-close type="button">Fechar</button></header>
+    <div class="row mk-row">
+      <label class="field mn-method">Método<select id="mn-method"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>ANY</option></select></label>
+      <label class="field grow">Caminho<input type="text" id="mn-path" placeholder="/utilizadores/{id}" autocomplete="off" spellcheck="false"></label>
+    </div>
+    <div class="row mk-row">
+      <label class="field grow">Query (opcional)<input type="text" id="mn-query" placeholder="estado=ATIVO" autocomplete="off" spellcheck="false"></label>
+      <label class="field mk-port">Código<input type="number" id="mn-status" min="100" max="599" value="200"></label>
+      <label class="field mk-port">Formato<select id="mn-ext"><option value="json">JSON</option><option value="xml">XML</option><option value="txt">Texto</option></select></label>
+    </div>
+    <p class="hint">Fica em <code id="mn-file">GET/index.json</code>. Um segmento entre chavetas (<code>{id}</code>) aceita qualquer valor; com query, só responde quando o pedido a traz.</p>
+    <footer><button class="btn" data-close type="button">Cancelar</button><button class="btn primary" data-act="mock-create-file" type="button">Criar e editar</button></footer>
   </div>
 </div>
 

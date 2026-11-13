@@ -30,6 +30,8 @@
 
   const state = {
     view: 'tarefas',
+    // a página Mocks: a lista, o escolhido, o separador, os ficheiros e os pedidos de cada um
+    mocks: { list: [], java: null, sel: null, tab: 'respostas', files: null, filter: '', log: {}, edit: null },
     info: null,
     tasks: [],
     agents: [],
@@ -396,7 +398,7 @@
   }
 
   // -- vistas --
-  const CRUMBS = { tarefas: 'Tarefas', agentes: 'Agentes', servicos: 'Serviços', definicoes: 'Definições', tarefa: 'Tarefas' };
+  const CRUMBS = { tarefas: 'Tarefas', agentes: 'Agentes', servicos: 'Serviços', mocks: 'Mocks', definicoes: 'Definições', tarefa: 'Tarefas' };
 
   function setView(view) {
     state.view = view;
@@ -428,6 +430,7 @@
     state.task = null;
     if (view === 'agentes') { await loadAgents(); renderAgents(); setView('agentes'); return; }
     if (view === 'servicos') { await loadServices(); renderServices(); setView('servicos'); return; }
+    if (view === 'mocks') { if (id) state.mocks.sel = id; await loadMocks(); renderMocks(); setView('mocks'); return; }
     if (view === 'definicoes') { await Promise.all([loadInfo(), loadServices()]); renderSettings(); setView('definicoes'); return; }
     await loadTasks();
     renderTasks();
@@ -622,6 +625,8 @@
     fileCheck: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 14.5l2 2 4-4"/>',
     diff: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 10.5v5M9.5 13h5"/><path d="M9.5 18h5"/>',
     pause: '<path d="M9 6v12M15 6v12"/>',
+    stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+    edit: '<path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/>',
     alert: '<path d="M12 6v8"/><path d="M12 18h.01"/>',
     paste: '<rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="M9 11h6M9 15h4"/>',
   };
@@ -1161,6 +1166,23 @@
       <div class="banner bad alert-box"><div class="grow"><b>Recusado: ${esc(x.repo)}</b> · ${esc(hm(x.at))}${x.count > 1 ? ` · ${x.count} tentativas` : ''}<div>${esc(x.text)}</div>
         ${x.files && x.files.length ? `<div class="alert-files mono">${x.files.slice(0, 8).map(esc).join('<br>')}${(x.total || x.files.length) > 8 ? `<br>… e mais ${(x.total || x.files.length) - 8}` : ''}</div>` : ''}</div>
         <div class="row"><button class="btn small" data-act="alert-resolve" data-id="${esc(x.id)}" type="button">${x.kind === 'dirty' || x.kind === 'moved' ? 'Já guardei, tentar de novo' : 'Já resolvi'}</button><button class="btn small" data-act="alert-dismiss" data-id="${esc(x.id)}" type="button">Fechar</button></div></div>`).join('');
+    // a lista dos microserviços que o agente quer alterar: aceitar ou recusar antes de ele mexer neles
+    const plan = def.branch && f.repoPlan && f.repoPlan.status ? f.repoPlan : null;
+    const planBox = !plan ? '' : plan.status === 'proposed' ? (() => {
+      const chosenSet = new Set(t.chosenServices || []);
+      const from = f.links[plan.index] ? f.links[plan.index].name : 'o agente';
+      const list = plan.proposed || [];
+      const rows = list.map((x) => `<li><b class="mono">${esc(x.name)}</b>${!x.known ? ' <span class="pill bad">não existe na pasta raiz</span>' : chosenSet.size && !chosenSet.has(x.name) ? ' <span class="pill warn">fora da escolha</span>' : ''}${x.why ? `<span class="dim"> · ${esc(x.why)}</span>` : ''}</li>`).join('');
+      return `<div class="banner accent plan-box"><div class="grow">
+          <div><b>${list.length ? `${esc(from)} quer alterar ${list.length === 1 ? 'este microserviço' : `estes ${list.length} microserviços`}` : `${esc(from)} escreveu MICROSERVICOS.md, mas não reconheço nenhum microserviço`}</b> · ${esc(hm(plan.at))}</div>
+          ${rows ? `<ul class="plan-list">${rows}</ul>` : ''}
+          ${(plan.approved || []).length ? `<div class="dim">Já aprovados: ${esc(plan.approved.join(', '))}</div>` : ''}
+          <input type="text" id="plan-note" placeholder="${list.some((x) => x.known) ? 'Nota para o agente (obrigatória para recusar)' : 'Diz ao agente o que corrigir'}" autocomplete="off">
+        </div>
+        <div class="row">${list.some((x) => x.known) ? '<button class="btn small good" data-act="plan-approve" type="button">Aceitar</button>' : ''}<button class="btn small bad" data-act="plan-reject" type="button">Recusar</button><button class="btn small" data-act="view-output" data-index="${plan.index}" data-rel="MICROSERVICOS.md" type="button">Ver ficheiro</button></div></div>`;
+    })() : plan.status === 'rejected'
+      ? `<div class="banner warn"><div class="grow"><b>Recusaste a lista de microserviços</b>${plan.comment ? `: ${esc(plan.comment)}` : ''}. À espera que o agente proponha outra.</div></div>`
+      : `<div class="freeze"><span class="dot good"></span><b>Microserviços aprovados:</b> ${esc((plan.approved || []).join(', '))}. Uma escrita noutro é recusada.</div>`;
     const freeze = def.freeze && f.freeze && f.freeze.checkedAt ? (f.freeze.changed.length ? `<div class="banner bad"><div class="grow"><b>O código mudou durante os testes</b> em ${esc(f.freeze.changed.join(', '))}. Os resultados não valem como prova.</div></div>` : '<div class="freeze"><span class="dot good"></span><b>Código congelado:</b> confirmado no fim, nenhum microserviço mudou durante este passo.</div>') : '';
     const nDocs = state.outputsAll.reduce((s, o) => s + o.files.length, 0);
     const nFiles = state.changes ? allFiles().length : null;
@@ -1211,7 +1233,7 @@
         : '<div class="empty-state"><h2>Sem alterações</h2><p>Os microserviços desta tarefa ainda não foram alterados.</p></div>';
     }
 
-    return `<div class="step2">${left}<div class="step2-main">${alerts}${freeze}
+    return `<div class="step2">${left}<div class="step2-main">${alerts}${planBox}${freeze}
       <div class="card main2"><div class="card-head">${seg}${headExtra}</div><div class="card-body">${body}</div></div></div></div>`;
   }
 
@@ -1314,6 +1336,296 @@ ${x.kind === 'agent' ? '' : '<span class="pill mauve">só skill</span>'}
       <div class="scroll">${body}</div>`;
   }
 
+  // ===== Mocks =====
+  // Os mock servers: cada um responde aos microserviços com as respostas de uma pasta (src/mocks.js no servidor)
+  const MOCK_STATUS = { running: ['good', 'a correr'], starting: ['accent', 'a arrancar'], stopped: ['', 'parado'], failed: ['bad', 'parou com erro'] };
+  const mockPill = (s) => { const [tone, text] = MOCK_STATUS[s] || ['', s]; return `<span class="pill ${tone}">${s === 'starting' ? '<span class="dot accent live"></span>' : ''}${esc(text)}</span>`; };
+  const methodTag = (m) => `<span class="mtag m-${esc(String(m || '').toLowerCase())}">${esc(m || '—')}</span>`;
+  const codeTone = (c) => (c >= 500 ? 'bad' : c >= 400 ? 'warn' : c >= 300 ? 'accent' : 'good');
+  const curMock = () => state.mocks.list.find((m) => m.id === state.mocks.sel) || null;
+
+  // light: só a lista (no arranque, para contar os que estão a correr)
+  async function loadMocks(light = false) {
+    const r = await call(api.mocks.list());
+    if (r) { state.mocks.list = r.mocks; state.mocks.java = r.java; }
+    countMocks();
+    if (light) return;
+    const ms = state.mocks;
+    if (!ms.list.some((m) => m.id === ms.sel)) ms.sel = ms.list.length ? ms.list[0].id : null;
+    ms.files = null;
+    if (!ms.sel) return;
+    const [f, l] = await Promise.all([call(api.mocks.files(ms.sel)), call(api.mocks.log(ms.sel))]);
+    ms.files = f ? f.files : [];
+    if (l) ms.log[ms.sel] = l.entries;
+  }
+  async function loadMockFiles() {
+    const ms = state.mocks;
+    if (!ms.sel) return;
+    const f = await call(api.mocks.files(ms.sel));
+    ms.files = f ? f.files : [];
+    const m = curMock();
+    if (m) m.responses = ms.files.filter((x) => x.kind === 'response').length;
+  }
+  function countMocks() {
+    const n = state.mocks.list.filter((m) => m.status === 'running').length;
+    $('#count-mocks').textContent = n ? String(n) : '';
+  }
+
+  function renderMocks() {
+    const ms = state.mocks;
+    const java = ms.java;
+    const noJava = java && !java.found ? `<div class="banner bad"><div class="grow"><b>Não encontro o Java neste computador.</b> O mock server corre com o Java 11 ou mais recente (o mesmo dos microserviços): instala-o, ou define o <code>JAVA_HOME</code>, e volta a abrir a plataforma.</div></div>` : '';
+    const side = ms.list.map((m) => `<button class="mock-item${m.id === ms.sel ? ' active' : ''}" type="button" data-act="mock-select" data-id="${esc(m.id)}">
+        <span class="dot ${m.status === 'running' ? 'good' : m.status === 'starting' ? 'accent live' : m.status === 'failed' ? 'bad' : ''}"></span>
+        <span class="mi-name">${esc(m.name)}</span><span class="mi-port mono">:${esc(m.port)}</span>
+        <span class="mi-sub">${esc((MOCK_STATUS[m.status] || ['', m.status])[1])} · ${m.responses} resposta${m.responses === 1 ? '' : 's'}${m.recordFrom ? ' · a gravar' : ''}</span></button>`).join('');
+    const m = curMock();
+    const body = !ms.list.length
+      ? `<div class="empty-state"><h2>Ainda sem mocks</h2><p>Um mock responde aos microserviços em vez de um serviço externo (IAM, notificações...), com respostas guardadas em ficheiros: <code>GET/utilizadores/{id}.json</code> responde a <code>GET /utilizadores/&lt;qualquer&gt;</code>. Cada mock tem a sua porta e a sua pasta.</p><button class="btn primary" data-act="mock-new" type="button">Criar o primeiro mock</button></div>`
+      : `<div class="mocks"><div class="mocks-side">${side}</div><div class="mocks-main">${m ? mockDetail(m) : ''}</div></div>`;
+    $('#view-mocks').innerHTML = `
+      <div class="page-head">
+        <div class="grow"><h1>Mocks</h1><p class="sub">Servidores locais que respondem aos microserviços com respostas guardadas em ficheiros, numa pasta por mock.</p></div>
+        <button class="btn primary" data-act="mock-new" type="button">Novo mock</button>
+      </div>
+      <div class="scroll">${noJava}${body}</div>`;
+    paintMockFiles();
+    paintMockLog();
+  }
+
+  function mockDetail(m) {
+    const ms = state.mocks;
+    const on = m.status === 'running' || m.status === 'starting';
+    const files = ms.files || [];
+    const nResp = files.filter((x) => x.kind === 'response').length;
+    const nReq = (ms.log[m.id] || []).filter((x) => x.method).length;
+    const tabs = [['respostas', 'Respostas', nResp, 'doc'], ['pedidos', 'Pedidos', nReq, 'inbox']];
+    const seg = `<div class="seg big">${tabs.map(([v, lab, c, ic]) => `<button type="button" data-act="mock-tab" data-tab="${v}" class="${ms.tab === v ? 'active' : ''}">${icon(ic)}${lab} <span class="pill">${c}</span></button>`).join('')}</div>`;
+    const headExtra = ms.tab === 'respostas'
+      ? `<span class="row" style="margin-left:auto"><input type="search" id="mock-filter" class="mock-filter" placeholder="Procurar" value="${esc(ms.filter)}" autocomplete="off">${iconBtn('refresh', 'Ler a pasta de novo', 'mock-refresh-files', '')}<button class="btn small primary" data-act="mock-new-file" type="button">Nova resposta</button></span>`
+      : `<span class="row" style="margin-left:auto"><button class="btn small" data-act="mock-clear-log" type="button" ${nReq ? '' : 'disabled'}>Limpar</button></span>`;
+    return `
+      <div class="card"><div class="card-head"><h2>${esc(m.name)}</h2>${mockPill(m.status)}
+        <span class="row" style="margin-left:auto;gap:4px">
+          ${iconBtn('finder', `Abrir a pasta no ${FINDER}`, 'mock-reveal', '')}${iconBtn('copy', 'Copiar o endereço', 'mock-copy-url', '')}${iconBtn('edit', 'Mudar nome, porta, pasta', 'mock-edit', '', on)}${iconBtn('trash', 'Remover o mock', 'mock-remove', '')}
+          <span class="vsep"></span>
+          ${on ? `<button class="btn bad" data-act="mock-stop" type="button">${icon('stop')}Parar</button>` : `<button class="btn primary" data-act="mock-start" type="button" ${ms.java && !ms.java.found ? 'disabled' : ''}>${icon('play')}Iniciar</button>`}
+        </span></div>
+        <div class="card-body">
+          ${m.error && m.status === 'failed' ? `<div class="banner bad"><div class="grow">${esc(m.error)}</div></div>` : ''}
+          ${m.recordFrom ? `<div class="banner warn"><div class="grow"><b>Modo gravação:</b> cada pedido vai para <code>${esc(m.recordFrom)}</code>, e a resposta volta ao microserviço e fica guardada na pasta. Para responder só com o que gravou, muda o mock e apaga o endereço.</div></div>` : ''}
+          <dl class="kv">
+            <dt>Endereço</dt><dd><code>${esc(m.url)}</code>${m.status === 'running' ? ' <span class="dim">· a responder</span>' : ''}</dd>
+            <dt>Pasta</dt><dd><code>${esc(m.dir)}</code>${m.dirDefault ? ' <span class="dim">· na pasta de dados da plataforma</span>' : ''}</dd>
+          </dl>
+          <p class="hint mt">Nos microserviços, passa este endereço na variável do serviço que o mock substitui (por exemplo <code>SERVICO_X_URL=${esc(m.url)}</code>); num contentor, <code>http://host.docker.internal:${esc(m.port)}</code>.</p>
+        </div></div>
+      <div class="card main2"><div class="card-head">${seg}${headExtra}</div><div class="card-body">${ms.tab === 'respostas' ? '<div id="mock-files"></div>' : '<div id="mock-log" class="mock-log" aria-live="polite"></div>'}</div></div>`;
+  }
+
+  // a lista das respostas (só a tabela: procurar não redesenha a página)
+  function paintMockFiles() {
+    const box = $('#mock-files');
+    if (!box) return;
+    const ms = state.mocks;
+    if (!ms.files) { box.innerHTML = '<div class="scan-wait"><span class="spinner" aria-hidden="true"></span>A ler a pasta…</div>'; return; }
+    const q = ms.filter.trim().toLowerCase();
+    const files = ms.files.filter((f) => !q || `${f.rel} ${f.method || ''} ${f.route || ''} ${f.query || ''} ${f.status || ''}`.toLowerCase().includes(q));
+    if (!ms.files.length) { box.innerHTML = '<p class="muted">A pasta está vazia. Cria uma resposta, ou arranca o mock em modo gravação.</p>'; return; }
+    if (!files.length) { box.innerHTML = '<p class="muted">Nenhuma resposta com esse texto.</p>'; return; }
+    const data = (f) => `data-rel="${esc(f.rel)}"`;
+    const rows = files.map((f) => {
+      if (f.kind === 'response') {
+        return `<tr class="mock-row" data-act="mock-file-open" ${data(f)}><td>${methodTag(f.method)}</td>
+          <td class="mono">${esc(f.route)}${f.query ? `<span class="dim">?${esc(f.query)}</span>` : ''}</td>
+          <td><span class="pill ${codeTone(f.status)}">${f.status}</span></td>
+          <td class="dim mono mock-rel" title="${esc(f.rel)}">${esc(f.rel)}</td>
+          <td class="acts">${iconBtn('eye', 'Ver e editar', 'mock-file-open', data(f))}${iconBtn('finder', `Mostrar no ${FINDER}`, 'mock-file-reveal', data(f))}${iconBtn('trash', 'Apagar', 'mock-file-delete', data(f))}</td></tr>`;
+      }
+      const what = f.kind === 'headers' ? `cabeçalhos de <span class="mono">${esc(f.of)}</span>` : 'não é uma resposta: o mock ignora-o (o nome tem de ser <span class="mono">&lt;MÉTODO&gt;/&lt;caminho&gt;.json</span>, .xml, .txt...)';
+      return `<tr class="mock-row other"${f.kind === 'headers' ? ` data-act="mock-file-open" ${data(f)}` : ''}><td>${f.kind === 'headers' ? '<span class="mtag">cab.</span>' : '<span class="mtag">—</span>'}</td>
+        <td colspan="2" class="dim">${what}</td><td class="dim mono mock-rel" title="${esc(f.rel)}">${esc(f.rel)}</td>
+        <td class="acts">${f.kind === 'headers' ? iconBtn('eye', 'Ver e editar', 'mock-file-open', data(f)) : ''}${iconBtn('finder', `Mostrar no ${FINDER}`, 'mock-file-reveal', data(f))}${iconBtn('trash', 'Apagar', 'mock-file-delete', data(f))}</td></tr>`;
+    }).join('');
+    box.innerHTML = `<table class="mock-table"><thead><tr><th>Método</th><th>Pedido</th><th>Código</th><th>Ficheiro</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  // os pedidos que o mock recebeu, o mais recente em baixo
+  function paintMockLog() {
+    const box = $('#mock-log');
+    if (!box) return;
+    const near = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    const entries = state.mocks.log[state.mocks.sel] || [];
+    box.innerHTML = entries.length ? entries.map((e) => {
+      if (!e.method) return `<div class="ml-note${e.err ? ' err' : ''}">${esc(e.text || '')}</div>`;
+      const miss = e.suggest ? `<span class="dim">sem mock</span> <button class="btn small" type="button" data-act="mock-new-file" data-method="${esc(e.method)}" data-path="${esc(e.path)}">Criar resposta</button>` : `<span class="mono dim">${esc(e.what)}</span>`;
+      return `<div class="ml-row"><span class="dim mono">${esc(e.at)}</span>${methodTag(e.method)}<span class="mono ml-path" title="${esc(e.path)}">${esc(e.path)}</span><span class="pill ${codeTone(e.status)}">${e.status}</span>${miss}<span class="dim ml-ms">${e.ms} ms</span>
+        ${e.body ? `<div class="ml-body mono">${esc(e.body)}</div>` : ''}</div>`;
+    }).join('') : `<p class="muted">Ainda sem pedidos.${curMock() && curMock().status === 'running' ? ' Aqui aparecem, ao vivo, os pedidos que os microserviços fazem a este mock.' : ' Inicia o mock e os pedidos aparecem aqui, ao vivo.'}</p>`;
+    if (near || !box.dataset.seen) box.scrollTop = box.scrollHeight;
+    box.dataset.seen = '1';
+  }
+
+  function onMockEvent(e) {
+    const ms = state.mocks;
+    const m = ms.list.find((x) => x.id === e.id);
+    if (e.kind === 'status' && m) {
+      m.status = e.status;
+      m.error = e.error || '';
+      countMocks();
+      if (state.view === 'mocks') renderMocks();
+      if (e.status === 'failed' && e.error) toast(`${m.name}: ${e.error}`, true);
+      return;
+    }
+    if (e.kind !== 'log') return;
+    const list = ms.log[e.id] = ms.log[e.id] || [];
+    if (e.replaceLast && list.length) list[list.length - 1] = e.entry;
+    else list.push(e.entry);
+    if (list.length > 400) list.splice(0, list.length - 400);
+    if (state.view !== 'mocks' || ms.sel !== e.id) return;
+    // em modo gravação, cada pedido pode trazer um ficheiro novo
+    if (e.entry.what && /^gravado/.test(e.entry.what) && !e.replaceLast) loadMockFiles().then(() => { if (ms.tab === 'respostas') paintMockFiles(); });
+    if (ms.tab === 'pedidos') {
+      paintMockLog();
+      const pillBox = $$('#view-mocks .seg.big button')[1];
+      if (pillBox) { const p = pillBox.querySelector('.pill'); if (p) p.textContent = String(list.filter((x) => x.method).length); }
+    }
+  }
+
+  function openMockModal(m) {
+    const used = new Set(state.mocks.list.map((x) => x.port));
+    let port = 8089;
+    while (used.has(port)) port += 1;
+    state.mocks.editing = m ? m.id : null;
+    $('#mk-title').textContent = m ? `Mudar o mock ${m.name}` : 'Novo mock';
+    $('#mk-name').value = m ? m.name : '';
+    $('#mk-port').value = m ? m.port : port;
+    $('#mk-dir').value = m && !m.dirDefault ? m.dir : '';
+    $('#mk-record').value = m ? m.recordFrom || '' : '';
+    $('#modal-mock').classList.add('open');
+    $('#mk-name').focus();
+  }
+
+  // o nome do ficheiro de uma resposta nova, como o servidor o vai dar
+  function newFileName() {
+    const method = $('#mn-method').value;
+    const [p, q0] = $('#mn-path').value.trim().split('?');
+    const segs = p.split('/').filter(Boolean);
+    if (!segs.length) segs.push('index');
+    const query = ($('#mn-query').value.trim() || q0 || '').replace(/^\?/, '');
+    const status = Number($('#mn-status').value) || 200;
+    return `${[method, ...segs.slice(0, -1)].join('/')}/${segs[segs.length - 1]}${query ? `@${query}` : ''}${status !== 200 ? `.${status}` : ''}.${$('#mn-ext').value}`;
+  }
+  function paintNewFileName() { if ($('#mn-file')) $('#mn-file').textContent = newFileName(); }
+  function openNewMockFile(method, pathQuery) {
+    const [p, q] = String(pathQuery || '').split('?');
+    $('#mn-method').value = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'ANY'].includes(method) ? method : 'GET';
+    $('#mn-path').value = p ? decodeURIComponent(p) : '';
+    $('#mn-query').value = q ? decodeURIComponent(q) : '';
+    $('#mn-status').value = '200';
+    $('#mn-ext').value = 'json';
+    paintNewFileName();
+    $('#modal-mock-new').classList.add('open');
+    $('#mn-path').focus();
+  }
+
+  async function openMockFile(rel) {
+    const ms = state.mocks;
+    const r = await call(api.mocks.read(ms.sel, rel));
+    if (!r) return;
+    if (r.binary || r.tooBig) { toast(r.binary ? 'Esta resposta não é texto: abre-a no gestor de ficheiros' : 'Esta resposta é grande demais para editar aqui', true); return; }
+    ms.edit = { rel };
+    const d = r.describe || {};
+    $('#mf-title').textContent = rel;
+    $('#mf-meta').textContent = `${size(r.size)}`;
+    $('#mf-route').innerHTML = d.kind === 'response'
+      ? `Responde a ${methodTag(d.method)} <span class="mono">${esc(d.route)}${d.query ? `?${esc(d.query)}` : ''}</span> com <span class="pill ${codeTone(d.status)}">${d.status}</span>`
+      : d.kind === 'headers' ? `Cabeçalhos extra de <span class="mono">${esc(d.of)}</span>, um por linha: <span class="mono">Nome: valor</span>` : '';
+    $('#mf-text').value = r.text;
+    $('#modal-mock-file').classList.add('open');
+    $('#mf-text').focus();
+  }
+
+  // juntam-se às outras ações quando elas existirem (const actions, mais abaixo)
+  const mockActions = {
+    'mock-new': () => openMockModal(null),
+    'mock-edit': () => { const m = curMock(); if (m) openMockModal(m); },
+    'mock-pick-folder': async () => { const r = await call(api.mocks.pickFolder()); if (r && r.folder) $('#mk-dir').value = r.folder; },
+    'mock-save': async () => {
+      const id = state.mocks.editing;
+      const r = await call(api.mocks.save({ id, name: $('#mk-name').value, port: Number($('#mk-port').value), dir: $('#mk-dir').value, recordFrom: $('#mk-record').value }));
+      if (!r) return;
+      $('#modal-mock').classList.remove('open');
+      state.mocks.sel = r.mock.id;
+      toast(id ? 'Mock guardado' : 'Mock criado');
+      await loadMocks();
+      renderMocks();
+    },
+    'mock-select': async (el) => {
+      if (state.mocks.sel === el.dataset.id) return;
+      state.mocks.sel = el.dataset.id;
+      state.mocks.filter = '';
+      await loadMocks();
+      renderMocks();
+    },
+    'mock-tab': (el) => { state.mocks.tab = el.dataset.tab; renderMocks(); },
+    'mock-start': async () => {
+      const m = curMock();
+      if (!m) return;
+      m.status = 'starting';
+      renderMocks();
+      if (!(await call(api.mocks.start(m.id)))) { await loadMocks(); renderMocks(); }
+    },
+    'mock-stop': async () => { const m = curMock(); if (m) await call(api.mocks.stop(m.id)); },
+    'mock-remove': async () => {
+      const m = curMock();
+      if (!m || !(await confirmBox('Remover o mock', `Remover o mock ${m.name} da plataforma? ${m.status === 'running' ? 'Ele pára, e a' : 'A'} pasta das respostas fica onde está.`, 'Remover'))) return;
+      if (await call(api.mocks.remove(m.id))) { state.mocks.sel = null; await loadMocks(); renderMocks(); }
+    },
+    'mock-reveal': async () => { const m = curMock(); if (m) await call(api.mocks.reveal(m.id)); },
+    'mock-copy-url': async () => { const m = curMock(); if (!m) return; await navigator.clipboard.writeText(m.url); toast('Endereço copiado'); },
+    'mock-refresh-files': async () => { await loadMockFiles(); renderMocks(); },
+    'mock-clear-log': async () => { const m = curMock(); if (m && (await call(api.mocks.clearLog(m.id)))) { state.mocks.log[m.id] = []; renderMocks(); } },
+    'mock-new-file': (el) => openNewMockFile(el.dataset.method, el.dataset.path),
+    'mock-create-file': async () => {
+      const r = await call(api.mocks.createFile(state.mocks.sel, { method: $('#mn-method').value, path: $('#mn-path').value, query: $('#mn-query').value, status: Number($('#mn-status').value) || 200, ext: $('#mn-ext').value }));
+      if (!r) return;
+      $('#modal-mock-new').classList.remove('open');
+      await loadMockFiles();
+      renderMocks();
+      await openMockFile(r.rel);
+    },
+    'mock-file-open': async (el) => openMockFile(el.dataset.rel),
+    'mock-file-reveal': async (el) => { await call(api.mocks.reveal(state.mocks.sel, el.dataset.rel)); },
+    'mock-file-save': async () => {
+      const ms = state.mocks;
+      if (!ms.edit) return;
+      const text = $('#mf-text').value;
+      let warn = '';
+      if (/\.json$/i.test(ms.edit.rel) && text.trim()) {
+        try {
+          JSON.parse(text.replace(/\{\{[^}]*\}\}/g, '0'));
+        } catch (err) {
+          warn = `Guardado, mas não é JSON válido: ${err.message}`;
+        }
+      }
+      if (!(await call(api.mocks.write(ms.sel, ms.edit.rel, text)))) return;
+      $('#modal-mock-file').classList.remove('open');
+      toast(warn || 'Guardado: vale já no próximo pedido', Boolean(warn));
+      await loadMockFiles();
+      renderMocks();
+    },
+    'mock-file-delete': async (el) => {
+      const ms = state.mocks;
+      const rel = el.dataset.rel || (ms.edit && ms.edit.rel);
+      if (!rel || !(await confirmBox('Apagar a resposta', `Apagar ${rel} da pasta do mock? Não se pode desfazer.`, 'Apagar'))) return;
+      if (!(await call(api.mocks.deleteFile(ms.sel, rel)))) return;
+      $('#modal-mock-file').classList.remove('open');
+      await loadMockFiles();
+      renderMocks();
+    },
+  };
+
   // ===== Definições =====
   function renderSettings() {
     const i = state.info;
@@ -1387,10 +1699,12 @@ ${x.kind === 'agent' ? '' : '<span class="pill mauve">só skill</span>'}
   async function reloadTask(opts = {}) {
     if (!state.task) return;
     const keep = $('#msg-in') ? $('#msg-in').value : '';
+    const note = $('#plan-note') ? $('#plan-note').value : ''; // a nota para o agente, no cartão da lista de microserviços
     if (await loadTask(state.task.id)) {
       await renderTask(opts);
       setView('tarefa');
       if (keep && $('#msg-in')) $('#msg-in').value = keep;
+      if (note && $('#plan-note')) $('#plan-note').value = note;
     }
   }
 
@@ -1782,6 +2096,17 @@ ${x.kind === 'agent' ? '' : '<span class="pill mauve">só skill</span>'}
       const r = await call(api.pipeline.alertResolve(taskId(), el.dataset.id));
       if (r) { toast(r.told ? 'Resolvido. O agente vai tentar de novo.' : 'Resolvido.'); await reloadTask({ light: true }); }
     },
+    'plan-approve': async () => {
+      const note = $('#plan-note') ? $('#plan-note').value : '';
+      const r = await call(api.pipeline.repoPlan(taskId(), stepId(), 'approve', note));
+      if (r) { toast(r.told ? 'Aprovado: o agente continua' : 'Aprovado'); await reloadTask({ light: true }); }
+    },
+    'plan-reject': async () => {
+      const box = $('#plan-note');
+      const note = box ? box.value.trim() : '';
+      if (!note) { toast('Escreve ao agente porque recusas', true); if (box) box.focus(); return; }
+      if (await call(api.pipeline.repoPlan(taskId(), stepId(), 'reject', note))) await reloadTask({ light: true });
+    },
     'alert-dismiss': async (el) => { if (await call(api.pipeline.alertDismiss(taskId(), el.dataset.id))) await reloadTask({ light: true }); },
     'save-branch': async () => { if (await call(api.pipeline.setBranch(taskId(), $('#branch-in').value))) { toast('Branch guardado'); await reloadTask({ light: true }); } },
     // -- agentes --
@@ -1828,6 +2153,7 @@ ${x.kind === 'agent' ? '' : '<span class="pill mauve">só skill</span>'}
     },
     recheck: async () => { await loadInfo(true); renderSettings(); },
   };
+  Object.assign(actions, mockActions); // as da página Mocks
 
   document.addEventListener('click', async (e) => {
     const go = e.target.closest('[data-go]');
@@ -1963,6 +2289,8 @@ ${x.kind === 'agent' ? '' : '<span class="pill mauve">só skill</span>'}
   // procurar na lista dos microserviços, sem redesenhar
   document.addEventListener('input', (e) => {
     if (e.target.id === 'svc-filter') { state.svcFilter = e.target.value; filterServices(); }
+    if (e.target.id === 'mock-filter') { state.mocks.filter = e.target.value; paintMockFiles(); }
+    if (['mn-method', 'mn-path', 'mn-query', 'mn-status', 'mn-ext'].includes(e.target.id)) paintNewFileName();
     if (e.target.classList.contains('doubt-a')) {
       e.target.style.height = 'auto';
       e.target.style.height = `${e.target.scrollHeight}px`;
@@ -2161,6 +2489,7 @@ ${x.kind === 'agent' ? '' : '<span class="pill mauve">só skill</span>'}
     listTimer = setTimeout(async () => { listTimer = null; if (state.view === 'tarefas') { await loadTasks(); renderTasks(); } }, 400);
   };
   api.onTaskEvent(async (e) => {
+    if (e.type === 'mock') { onMockEvent(e); return; }
     const t = state.task;
     if (e.type === 'log' && office.inst && office.task === e.taskId && office.step === e.step) office.inst.feed(e.index, e.entry);
     if (e.type === 'log' && face.ref === `${e.taskId}|${e.step}|${e.index}`) faceFromEntry(e.entry);
@@ -2234,7 +2563,7 @@ ${x.kind === 'agent' ? '' : '<span class="pill mauve">só skill</span>'}
   }
   (async () => {
     loadInfo(); // os --version dos programas: em fundo, a barra lateral mostra-os quando chegarem
-    await Promise.all([loadAgents(true), loadServices()]);
+    await Promise.all([loadAgents(true), loadServices(), loadMocks(true)]);
     await route();
   })();
 })();

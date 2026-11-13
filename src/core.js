@@ -10,6 +10,7 @@ const agents = require('./agents');
 const services = require('./services');
 const settings = require('./settings');
 const tasks = require('./tasks');
+const mocks = require('./mocks');
 const { spawn } = require('child_process');
 const { copilotAuth } = require('./copilot-session');
 
@@ -71,6 +72,7 @@ function registerAll(ipcMain, ctx) {
   agents.register(ipcMain, ctx);
   services.register(ipcMain, ctx);
   tasks.register(ipcMain, ctx);
+  mocks.register(ipcMain, ctx);
   ipcMain.handle('app:info', async (_, again) => {
     const fresh = Boolean(again);
     return {
@@ -111,4 +113,10 @@ function registerAll(ipcMain, ctx) {
   });
 }
 
-module.exports = { registerAll, stopAll: tasks.stopAll };
+// ao fechar: os agentes e os mock servers param
+const stopAll = () => {
+  tasks.stopAll();
+  mocks.stopAll();
+};
+
+module.exports = { registerAll, stopAll };

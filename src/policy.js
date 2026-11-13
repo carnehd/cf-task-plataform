@@ -2,8 +2,8 @@
 // dos microserviços: só de caminhos e de comandos.
 //   ler:       sempre, na pasta raiz e nas pastas da tarefa (o CLI já as conhece)
 //   escrever:  nas pastas que o passo dá (os resultados do agente, os testes da tarefa) e, num passo que altera os
-//              microserviços, dentro de um deles: antes da primeira escrita num microserviço, prepareRepo() passa-o para o
-//              branch da tarefa (ou recusa, se tiver alterações por guardar)
+//              microserviços, dentro de um deles: só nos que a pessoa aprovou (approveRepo) e, antes da primeira escrita
+//              num microserviço, prepareRepo() passa-o para o branch da tarefa (ou recusa, se tiver alterações por guardar)
 //   comandos:  cada um é perguntado à pessoa; alguns são recusados sem perguntar (push, mexer nos branches, sudo...)
 const fs = require('fs');
 const path = require('path');
@@ -85,6 +85,10 @@ const BASH_DENIED = [
 // hidden: os documentos que a pessoa tirou das entradas deste passo (ficheiros ou pastas): o Read deles é recusado
 // repoTests: { marker, dir }: com o código congelado, ainda se escreve nas pastas de testes de cada microserviço (a pasta
 // com o ficheiro marker, ou <microserviço>/<dir>/ para criar uma), no branch da tarefa (prepareRepo)
+// approveRepo(nome) → '' ou o motivo de recusa: o microserviço tem de estar na lista que a pessoa aprovou
+// holdCommands() → true enquanto a pessoa não aprovou nenhum microserviço: em "tudo sem perguntar", os comandos que não
+// só leem passam a ser perguntados (um comando também altera ficheiros)
+// onWrite(caminho): uma escrita autorizada numa das pastas writeDirs (para a plataforma ler o que o agente lá deixou)
 function inRepoTests(repoDir, abs, repoTests) {
   const rel = path.relative(repoDir, abs).split(path.sep);
   if (repoTests.dir && rel.length > 1 && rel[0] === repoTests.dir) return true;
@@ -96,7 +100,7 @@ function inRepoTests(repoDir, abs, repoTests) {
   return false;
 }
 
-function makePolicy({ root, writeDirs = [], repos = false, prepareRepo, codeFrozen = false, perm = 'ask', hidden = [], repoTests = null }) {
+function makePolicy({ root, writeDirs = [], repos = false, prepareRepo, approveRepo = null, holdCommands = null, onWrite = null, codeFrozen = false, perm = 'ask', hidden = [], repoTests = null }) {
   const mode = PERMS.includes(perm) ? perm : 'ask';
   // só planear: não altera os microserviços
   if (mode === 'plan') { repos = false; repoTests = null; }
@@ -116,11 +120,16 @@ function makePolicy({ root, writeDirs = [], repos = false, prepareRepo, codeFroz
       const target = String(i.file_path || i.notebook_path || '');
       if (!target) return { action: 'deny', message: 'Sem caminho de ficheiro.' };
       const abs = real(path.isAbsolute(target) ? target : path.join(root, target));
-      if (writeReal.some((d) => inside(d, abs))) return { action: 'allow' };
+      if (writeReal.some((d) => inside(d, abs))) {
+        if (onWrite) onWrite(abs);
+        return { action: 'allow' };
+      }
       if (repos && inside(rootReal, abs) && abs !== rootReal) {
         const rel = path.relative(rootReal, abs).split(path.sep);
         if (rel.length < 2) return { action: 'deny', message: 'Só podes escrever dentro de um microserviço, não na pasta raiz.' };
         if (rel.includes('.git')) return { action: 'deny', message: 'A pasta .git é gerida pela plataforma.' };
+        const notYet = approveRepo ? await approveRepo(rel[0]) : '';
+        if (notYet) return { action: 'deny', message: notYet };
         const why = await prepareRepo(path.join(rootReal, rel[0]), rel[0]);
         if (why) return { action: 'deny', message: why };
         return { action: 'allow' };
@@ -140,7 +149,10 @@ function makePolicy({ root, writeDirs = [], repos = false, prepareRepo, codeFroz
       const cmd = String(i.command || '');
       for (const [re, why] of BASH_DENIED) if (re.test(cmd)) return { action: 'deny', message: why };
       if (mode === 'plan') return { action: 'deny', message: 'Estás em modo só planear: não corres comandos. Escreve o plano na tua pasta de resultados.' };
-      if (mode === 'all') return { action: 'allow', note: `${cmd.slice(0, 200)} · correu sem perguntar` };
+      if (mode === 'all') {
+        if (holdCommands && !isReadOnly(cmd) && await holdCommands()) return { action: 'ask' };
+        return { action: 'allow', note: `${cmd.slice(0, 200)} · correu sem perguntar` };
+      }
       if (mode === 'read' && isReadOnly(cmd)) return { action: 'allow', note: `${cmd.slice(0, 200)} · só leitura, correu sem perguntar` };
       return { action: 'ask' };
     }

@@ -225,6 +225,23 @@
       setAgentSettings: post('pipeline:set-agent-settings'),
       alertResolve: post('pipeline:alert-resolve'),
       alertDismiss: post('pipeline:alert-dismiss'),
+      repoPlan: post('pipeline:repo-plan'),
+    },
+    mocks: {
+      list: post('mocks:list'),
+      save: post('mocks:save'),
+      remove: post('mocks:remove'),
+      start: post('mocks:start'),
+      stop: post('mocks:stop'),
+      log: post('mocks:log'),
+      clearLog: post('mocks:clear-log'),
+      files: post('mocks:files'),
+      read: post('mocks:read'),
+      write: post('mocks:write'),
+      createFile: post('mocks:create-file'),
+      deleteFile: post('mocks:delete-file'),
+      reveal: post('mocks:reveal'),
+      pickFolder: picker('folder', 'Pasta das respostas do mock', 'folder'),
     },
     onTaskEvent: (cb) => {
       const source = new EventSource(`/events?t=${encodeURIComponent(token)}`);

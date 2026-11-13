@@ -107,7 +107,8 @@ adiciona os agentes de novo.
 1. **Documentos** de entrada: ficheiros, pastas ou texto colado. A plataforma guarda uma cópia.
 2. **Microserviços** (opcional): escolhes, da pasta raiz, os microserviços em que a tarefa mexe. A escolha vai no pedido
    a cada agente ("são estes os microserviços em causa"). Sem escolha, os agentes descobrem sozinhos, como as skills dizem.
-3. **Implementação**: os agentes alteram os microserviços num branch novo da tarefa.
+3. **Implementação**: os agentes alteram os microserviços num branch novo da tarefa, só os que aprovares: antes da
+   primeira alteração, o agente mostra-te a lista dos microserviços que vai alterar e porquê, e espera que aceites.
 4. **Ambiente**: os agentes levantam o que é preciso para testar (cada comando autorizado por ti).
 5. **Testes e relatório**: os agentes escrevem e correm os testes e o relatório, com o código congelado.
 
@@ -155,6 +156,28 @@ quando termina; o anel no chão tem a cor do estado. Com a sala à vista, a bola
 até a fechares. A cena usa o three.js (r160, licença MIT), que vem com a plataforma em `src/renderer/vendor/three/` e só
 se carrega da primeira vez que abres a sala.
 
+## Mocks
+
+A página **Mocks** gere servidores locais que respondem aos microserviços em vez de um serviço externo (IAM,
+notificações...), com respostas guardadas em ficheiros. Cada mock tem um nome, uma porta e uma pasta (por omissão,
+`data/mocks/<nome>`); corre com o Java deste computador (11 ou mais recente), sem instalar nem descarregar nada
+(`src/mock/MockServer.java`, só o JDK). **Todos os mocks correm num só processo Java**: arranca com o primeiro mock, cada
+um escuta na sua porta, e o processo termina quando o último pára.
+
+- **Iniciar e Parar** em cada mock. A plataforma confirma antes que a porta está livre, e os mocks param quando ela fecha.
+- **Respostas**: os ficheiros da pasta, com o pedido a que cada um responde. `GET/utilizadores/{id}.json` responde a
+  `GET /utilizadores/<qualquer>`; `GET/utilizadores@estado=ATIVO.json` só com essa query; `POST/utilizadores.201.json`
+  com o código 201; `ANY/...` a qualquer método. Criam-se, editam-se e apagam-se na página, e valem logo, sem reiniciar.
+  Na resposta (e nos ficheiros `.headers`): `{{id}}` (de um `{id}` do caminho), `{{query.x}}`, `{{corpo.campo}}`,
+  `{{agora}}`, `{{agora+5m}}` (também `+300` segundos, `+2h`, `+1d`), `{{uuid}}`.
+- **Pedidos**: o que os microserviços pedem ao mock, ao vivo, com o corpo recebido; um pedido sem resposta tem
+  **Criar resposta**, que abre o formulário já com o método e o caminho.
+- **Gravar de**: com o endereço do serviço verdadeiro, o mock reencaminha cada pedido para lá e guarda a resposta na
+  pasta, com o nome certo. Depois, sem o endereço, responde só com o que gravou.
+
+Nos microserviços, o endereço do mock vai na variável do serviço que ele substitui (por exemplo
+`SERVICO_X_URL=http://localhost:8089`); num contentor, `http://host.docker.internal:<porta>`.
+
 ## Claude Code e Copilot CLI
 
 Todos os agentes correm no CLI escolhido em **Agentes em**, no topo à direita (Claude Code ou Copilot CLI); os ficheiros de um agente servem aos dois. Na primeira vez a plataforma escolhe o que está instalado; um CLI que não está no computador aparece "(não instalado)" e o passo não começa enquanto estiver escolhido. Mudar o CLI vale a partir do próximo agente que começar, e a lista de modelos de cada agente passa a ser a desse CLI. Os dois passam pelas mesmas regras de cada passo, os mesmos pedidos de autorização e a mesma conversa. O Copilot corre em modo ACP (`copilot --acp`); o modelo escolhe-se da lista que o próprio Copilot CLI dá.
@@ -166,7 +189,7 @@ Diferenças do Copilot: aprova sozinho os comandos que considera seguros (um `ls
 | | Implementação | Ambiente | Testes e relatório |
 |---|---|---|---|
 | Ler | tudo na pasta raiz e na tarefa | igual | igual |
-| Escrever | os microserviços (no branch da tarefa) e a sua pasta de resultados | a sua pasta de resultados | a sua pasta de resultados e a pasta dos testes da tarefa |
+| Escrever | os microserviços que aprovaste (no branch da tarefa) e a sua pasta de resultados | a sua pasta de resultados | a sua pasta de resultados e a pasta dos testes da tarefa |
 | Comandos | cada um perguntado a ti | igual | igual |
 
 Sempre recusados, sem perguntar: `git push`, mudar de branch, `reset`, `rebase` e afins (a plataforma gere o Git),
@@ -175,6 +198,16 @@ Sempre recusados, sem perguntar: `git push`, mudar de branch, `reset`, `rebase` 
 **O branch da tarefa** (por omissão `feature/<referência>`) é criado pela plataforma em cada microserviço antes da
 primeira alteração de um agente nele. Se esse microserviço tiver alterações por guardar, a alteração é recusada: a
 plataforma não mexe no trabalho de ninguém. Nunca faz push.
+
+**Os microserviços a alterar são aprovados por ti.** No passo Implementação, o agente analisa primeiro (ler não
+precisa de aprovação) e, antes da primeira alteração, escreve `MICROSERVICOS.md` na sua pasta de resultados com os
+microserviços que vai alterar e porquê, uma linha por microserviço (`- <nome>: <motivo>`). O passo mostra a lista por
+cima da conversa, e assinala os que não estão na escolha do passo Microserviços e os que não existem na pasta raiz:
+**Aceitar** deixa-o alterá-los (com uma nota opcional para o agente); **Recusar** pede uma nota, que vai para o agente, e
+ele propõe outra lista. Uma escrita num microserviço que não está aprovado é recusada, mesmo que o agente não siga a
+instrução; se ele precisar de mais algum, pede de novo, e o cartão mostra só os que faltam. Em *tudo sem perguntar*, até
+aprovares a primeira lista, os comandos que não só leem são perguntados. A instrução vai no pedido que a plataforma faz
+ao agente: a skill do agente não precisa de mudar.
 
 **Nos testes o código fica congelado**: a plataforma guarda o estado dos repositórios onde a tarefa mexeu e dos
 microserviços escolhidos no início do passo, e confirma no fim que nada mudou.
